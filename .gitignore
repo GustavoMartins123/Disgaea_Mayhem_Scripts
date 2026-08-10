@@ -1,0 +1,5 @@
+# Git ignore for Disgaea Mayhem Mod Scripts
+*.pyc
+__pycache__/
+.tempmediaStorage/
+*.log
