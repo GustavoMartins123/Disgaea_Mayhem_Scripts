@@ -1,0 +1,38 @@
+{
+  "id": "item_world_speedup",
+  "name": "Item World - Multiplicador de Nível Acelerado",
+  "category": "Item World",
+  "version": "1.0.0",
+  "author": "Disgaea Mayhem Mod Team",
+  "description": "Acelera a progressão de equipamentos e armas no Mundo dos Itens, aumentando múltiplos níveis a cada andar concluído e garantindo subjugação automática de inocentes.",
+  "type": "toggle",
+  "enabled": true,
+  "components": "Script de progressão do Item World + Hook de andar",
+  "options": [
+    {
+      "id": "levels_per_floor",
+      "name": "Níveis de Equipamento por Andar (+Lv)",
+      "type": "slider_int",
+      "min": 1,
+      "max": 10,
+      "default": 5,
+      "value": 5
+    },
+    {
+      "id": "auto_subdue",
+      "name": "Subjugar Inocentes Automaticamente (100%)",
+      "type": "toggle",
+      "default": true,
+      "value": true
+    },
+    {
+      "id": "mystery_room_rate",
+      "name": "Taxa de Spawn de Mystery Rooms (%)",
+      "type": "slider_int",
+      "min": 10,
+      "max": 100,
+      "default": 75,
+      "value": 75
+    }
+  ]
+}

@@ -12,24 +12,31 @@ import shutil
 import sys
 import tempfile
 
-from tools.fad_texture_tool import FormatError, command_patch_bc7_region
-
-
 GAME_EXE_NAME = "Disgaea_Mayhem.exe"
 GAME_EXE_SHA256 = "13988368F66ADE40205C1D0D18157B6AE2D7736D67AC0C8734FE1DD4E62D5B41"
 ORIGINAL_FAD_SHA256 = "3236B852AF9DED7610EA6F5FA1E018993ED730CD032631E20AA11D9EF3650F8C"
 PATCHED_FAD_SHA256 = "81429742F0410E20813B8C300F6A6B633E9FE2598A72DEF5EB6CC16FB540EAA5"
 SLOT_DDS_SHA256 = "677B8F78A365C0E67C23DFF29E52925FF8A148949A6A130B77317133B00B3001"
 LZ4_DLL_SHA256 = "E0B615D8F9CD414B718AB00E70E5709F0483992383D9078A81ACF46ABBFD5FDA"
-NATIVE_DLL_SHA256 = "7D573CA7D44C88482D78FCB3D615437580D8ED0F367B2874A5AC77DFF5C947AD"
 
-ROOT = Path(__file__).resolve().parent
+def find_game_root() -> Path:
+    current = Path(__file__).resolve().parent
+    for p in [current, current.parent, current.parent.parent]:
+        if (p / GAME_EXE_NAME).is_file():
+            return p
+    return current
+
+ROOT = find_game_root()
+sys.path.insert(0, str(ROOT))
+from tools.fad_texture_tool import FormatError, command_patch_bc7_region
+
 EXE_PATH = ROOT / GAME_EXE_NAME
 FAD_PATH = ROOT / "data" / "fairy" / "AnmDat_1_00_EN.fad"
 BACKUP_PATH = ROOT / "data" / "fairy" / "AnmDat_1_00_EN.fad.mod-menu-original"
-SLOT_DDS_PATH = ROOT / "mods" / "main_menu" / "mods_slot.dds"
+SLOT_DDS_PATH = ROOT / "mods" / "mod_menu" / "main_menu" / "mods_slot.dds"
+if not SLOT_DDS_PATH.is_file():
+    SLOT_DDS_PATH = ROOT / "mods" / "main_menu" / "mods_slot.dds"
 LZ4_DLL_PATH = ROOT / "lz4.dll"
-NATIVE_DLL_PATH = ROOT / "mods" / "native" / "DisgaeaMayhemModMenu.dll"
 
 TH32CS_SNAPPROCESS = 0x00000002
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
@@ -98,78 +105,76 @@ def game_is_running() -> bool:
             if entry.szExeFile.casefold() == GAME_EXE_NAME.casefold():
                 return True
             if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                code = ctypes.get_last_error()
+                if code != 18:
+                    raise InstallError(f"Process32NextW falhou (Win32 {code})")
                 break
-        return False
     finally:
         kernel32.CloseHandle(snapshot)
-
-
-def create_backup_transactionally() -> None:
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{BACKUP_PATH.name}.", suffix=".tmp", dir=BACKUP_PATH.parent
-    )
-    temporary_path = Path(temporary_name)
-    try:
-        with FAD_PATH.open("rb") as source, os.fdopen(descriptor, "wb") as destination:
-            shutil.copyfileobj(source, destination, length=1024 * 1024)
-            destination.flush()
-            os.fsync(destination.fileno())
-        require_hash(temporary_path, ORIGINAL_FAD_SHA256, "backup temporario")
-        os.replace(temporary_path, BACKUP_PATH)
-    except Exception:
-        if temporary_path.exists():
-            temporary_path.unlink()
-        raise
+    return False
 
 
 def install() -> None:
     if game_is_running():
-        raise InstallError("feche Disgaea_Mayhem.exe antes de alterar o atlas")
+        raise InstallError(
+            "o jogo esta aberto; feche o executavel antes de instalar o atlas"
+        )
     require_hash(EXE_PATH, GAME_EXE_SHA256, "executavel")
     require_hash(SLOT_DDS_PATH, SLOT_DDS_SHA256, "asset do quinto item")
     require_hash(LZ4_DLL_PATH, LZ4_DLL_SHA256, "biblioteca LZ4 do jogo")
-    require_hash(NATIVE_DLL_PATH, NATIVE_DLL_SHA256, "renderer DirectX 12")
     if not FAD_PATH.is_file():
         raise InstallError(f"atlas do Main Menu ausente: {FAD_PATH}")
 
-    archive_hash = sha256(FAD_PATH)
-    if archive_hash == PATCHED_FAD_SHA256:
-        require_hash(BACKUP_PATH, ORIGINAL_FAD_SHA256, "backup transacional")
-        print("[OK] Rotulo Mods ja esta instalado e foi validado.")
+    current_hash = sha256(FAD_PATH)
+    if current_hash == PATCHED_FAD_SHA256:
+        print("[OK] O atlas do Main Menu ja contem o rotulo Mods.")
         return
-    if archive_hash != ORIGINAL_FAD_SHA256:
+    if current_hash != ORIGINAL_FAD_SHA256:
         raise InstallError(
-            "atlas incompativel; nenhuma alteracao foi feita. "
-            f"SHA-256 encontrado={archive_hash}"
+            "atlas do Main Menu possui SHA-256 desconhecido; "
+            f"encontrado={current_hash}"
         )
 
-    if BACKUP_PATH.exists():
-        require_hash(BACKUP_PATH, ORIGINAL_FAD_SHA256, "backup transacional")
-    else:
-        create_backup_transactionally()
-        require_hash(BACKUP_PATH, ORIGINAL_FAD_SHA256, "backup transacional")
+    if not BACKUP_PATH.is_file():
+        shutil.copyfile(FAD_PATH, BACKUP_PATH)
 
-    command_patch_bc7_region(
-        FAD_PATH,
-        "UI_05100_MainMenu02.tga",
-        SLOT_DDS_PATH,
-        768,
-        128,
-        LZ4_DLL_PATH,
+    temp_fd, temp_path_str = tempfile.mkstemp(
+        prefix="AnmDat_1_00_EN.", suffix=".tmp", dir=str(FAD_PATH.parent)
     )
-    require_hash(FAD_PATH, PATCHED_FAD_SHA256, "atlas instalado")
-    print("[OK] Rotulo Mods instalado abaixo de System.")
-    print(f"[OK] Backup original validado: {BACKUP_PATH.name}")
+    os.close(temp_fd)
+    temp_path = Path(temp_path_str)
+    try:
+        try:
+            command_patch_bc7_region(
+                archive_path=FAD_PATH,
+                output_path=temp_path,
+                source_identifier="UI_05100",
+                patch_dds_path=SLOT_DDS_PATH,
+                x=0,
+                y=320,
+                lz4_dll_path=LZ4_DLL_PATH,
+            )
+        except FormatError as error:
+            raise InstallError(f"falha ao aplicar textura no FAD: {error}") from error
+
+        require_hash(temp_path, PATCHED_FAD_SHA256, "atlas gerado")
+        os.replace(temp_path, FAD_PATH)
+        require_hash(FAD_PATH, PATCHED_FAD_SHA256, "atlas instalado")
+    finally:
+        if temp_path.is_file():
+            temp_path.unlink()
+
+    print("[OK] Rotulo Mods instalado com sucesso no atlas do Main Menu.")
 
 
 def main() -> int:
     try:
         install()
-    except (InstallError, FormatError, OSError) as error:
+    except (InstallError, OSError) as error:
         print(f"ERRO: {error}", file=sys.stderr)
         return 1
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

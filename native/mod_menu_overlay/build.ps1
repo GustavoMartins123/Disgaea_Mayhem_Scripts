@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
+$gameRoot = Resolve-Path (Join-Path $project '..\..')
 $outputDirectory = Join-Path $project 'build'
 $objectDirectory = Join-Path $outputDirectory 'obj'
 $output = Join-Path $outputDirectory 'DisgaeaMayhemModMenu.dll'
@@ -55,8 +56,6 @@ foreach ($source in $cppSources) {
     $object = Join-Path $objectDirectory $name
     $sourceFlags = $cppFlags
     if ($source.StartsWith('vendor\imgui\')) {
-        # ImGui supports MinGW; these switches account for the older DirectX
-        # enum definitions and assert-only HRESULT variables in TDM-GCC 10.3.
         $sourceFlags = $sourceFlags + @(
             '-fpermissive',
             '-Wno-error'
@@ -75,4 +74,21 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Falha ao vincular DisgaeaMayhemModMenu.dll'
 }
 
-Write-Host "[OK] DLL nativo criado: $output"
+# Deploy to game directories
+$gameNativeDll = Join-Path $gameRoot 'mods\native\DisgaeaMayhemModMenu.dll'
+$gameDxgiDll = Join-Path $gameRoot 'dxgi.dll'
+
+try {
+    Copy-Item $output -Destination $gameNativeDll -Force
+} catch {
+    Write-Warning "mods\native\DisgaeaMayhemModMenu.dll em uso pelo jogo."
+}
+
+try {
+    Copy-Item $output -Destination $gameDxgiDll -Force
+    Write-Host "[OK] Proxy de auto-inicializacao atualizado: $gameDxgiDll"
+} catch {
+    Write-Warning "dxgi.dll em uso pelo jogo (feche o jogo para atualizar o arquivo)."
+}
+
+Write-Host "[OK] DLL nativo compilado com sucesso: $output"

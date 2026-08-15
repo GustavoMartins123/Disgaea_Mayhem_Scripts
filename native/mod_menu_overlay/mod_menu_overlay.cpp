@@ -11,11 +11,156 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
 
 #include "MinHook.h"
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 
+// -----------------------------------------------------------------------------
+// DXGI System Proxy Forwarder
+// -----------------------------------------------------------------------------
+namespace ProxyDXGI {
+
+static HMODULE g_real_dxgi = nullptr;
+
+inline void EnsureRealDxgiLoaded() {
+    if (g_real_dxgi != nullptr) {
+        return;
+    }
+    wchar_t sys_path[MAX_PATH] = {};
+    GetSystemDirectoryW(sys_path, MAX_PATH);
+    lstrcatW(sys_path, L"\\dxgi.dll");
+    g_real_dxgi = LoadLibraryW(sys_path);
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+
+template <typename T>
+T GetRealProc(const char* name) {
+    EnsureRealDxgiLoaded();
+    if (g_real_dxgi == nullptr) {
+        return nullptr;
+    }
+    return reinterpret_cast<T>(reinterpret_cast<void*>(GetProcAddress(g_real_dxgi, name)));
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+}  // namespace ProxyDXGI
+
+#define DXGI_EXPORT extern "C" __declspec(dllexport)
+
+DXGI_EXPORT HRESULT WINAPI CreateDXGIFactory(REFIID riid, void** ppFactory) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(REFIID, void**)>("CreateDXGIFactory");
+    return fn ? fn(riid, ppFactory) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI CreateDXGIFactory1(REFIID riid, void** ppFactory) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(REFIID, void**)>("CreateDXGIFactory1");
+    return fn ? fn(riid, ppFactory) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI CreateDXGIFactory2(UINT Flags, REFIID riid, void** ppFactory) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(UINT, REFIID, void**)>("CreateDXGIFactory2");
+    return fn ? fn(Flags, riid, ppFactory) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGIGetDebugInterface1(UINT Flags, REFIID riid, void** pDebug) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(UINT, REFIID, void**)>("DXGIGetDebugInterface1");
+    return fn ? fn(Flags, riid, pDebug) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGIDeclareAdapterRemovalSupport() {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)()>("DXGIDeclareAdapterRemovalSupport");
+    return fn ? fn() : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGIDisableVBlankVirtualization() {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)()>("DXGIDisableVBlankVirtualization");
+    return fn ? fn() : E_FAIL;
+}
+
+DXGI_EXPORT void WINAPI ApplyCompatResolutionQuirking(void* a, void* b) {
+    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*, void*)>("ApplyCompatResolutionQuirking");
+    if (fn) fn(a, b);
+}
+
+DXGI_EXPORT void WINAPI CompatString(void* a) {
+    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*)>("CompatString");
+    if (fn) fn(a);
+}
+
+DXGI_EXPORT void WINAPI CompatValue(void* a, void* b) {
+    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*, void*)>("CompatValue");
+    if (fn) fn(a, b);
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGID3D10CreateDevice(void* a, void* b, void* c, void* d, void* e, void* f) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*, void*, void*, void*, void*)>("DXGID3D10CreateDevice");
+    return fn ? fn(a, b, c, d, e, f) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGID3D10CreateLayeredDevice(void* a, void* b, void* c, void* d, void* e) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*, void*, void*, void*)>("DXGID3D10CreateLayeredDevice");
+    return fn ? fn(a, b, c, d, e) : E_FAIL;
+}
+
+DXGI_EXPORT SIZE_T WINAPI DXGID3D10GetLayeredDeviceSize(void* a, void* b) {
+    static auto fn = ProxyDXGI::GetRealProc<SIZE_T(WINAPI*)(void*, void*)>("DXGID3D10GetLayeredDeviceSize");
+    return fn ? fn(a, b) : 0;
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGID3D10RegisterLayers(void* a, void* b) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*)>("DXGID3D10RegisterLayers");
+    return fn ? fn(a, b) : E_FAIL;
+}
+
+DXGI_EXPORT void WINAPI DXGIDumpJournal(void* a) {
+    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*)>("DXGIDumpJournal");
+    if (fn) fn(a);
+}
+
+DXGI_EXPORT HRESULT WINAPI DXGIReportAdapterConfiguration(void* a) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*)>("DXGIReportAdapterConfiguration");
+    return fn ? fn(a) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI PIXBeginCapture(void* a, void* b) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*)>("PIXBeginCapture");
+    return fn ? fn(a, b) : E_FAIL;
+}
+
+DXGI_EXPORT HRESULT WINAPI PIXEndCapture(void* a) {
+    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*)>("PIXEndCapture");
+    return fn ? fn(a) : E_FAIL;
+}
+
+DXGI_EXPORT DWORD WINAPI PIXGetCaptureState() {
+    static auto fn = ProxyDXGI::GetRealProc<DWORD(WINAPI*)()>("PIXGetCaptureState");
+    return fn ? fn() : 0;
+}
+
+DXGI_EXPORT void WINAPI SetAppCompatStringPointer(void* a, void* b) {
+    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*, void*)>("SetAppCompatStringPointer");
+    if (fn) fn(a, b);
+}
+
+DXGI_EXPORT void WINAPI UpdateHMDEmulationStatus(void* a) {
+    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*)>("UpdateHMDEmulationStatus");
+    if (fn) fn(a);
+}
+
+// -----------------------------------------------------------------------------
+// Mod Menu Engine & Overlay Implementation
+// -----------------------------------------------------------------------------
 namespace {
 
 constexpr LONG STATUS_WAITING = 0;
@@ -57,7 +202,9 @@ using ExecuteCommandListsFn = void(STDMETHODCALLTYPE*)(
     ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
 
 HMODULE g_module = nullptr;
-SharedState* g_shared = nullptr;
+static SharedState g_embedded_shared = {};
+SharedState* g_shared = &g_embedded_shared;
+
 PresentFn g_original_present = nullptr;
 ResizeBuffersFn g_original_resize_buffers = nullptr;
 ExecuteCommandListsFn g_original_execute_command_lists = nullptr;
@@ -92,6 +239,7 @@ bool g_last_b_down = false;
 bool g_last_escape_down = false;
 LARGE_INTEGER g_last_counter = {};
 LARGE_INTEGER g_counter_frequency = {};
+void* g_hook_stub = nullptr;
 
 template <typename T>
 void SafeRelease(T*& value) {
@@ -453,7 +601,7 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
 }
 
 void UpdateOverlayState() {
-    if (g_shared->open_request != 0) {
+    if (g_shared != nullptr && g_shared->open_request != 0) {
         g_shared->open_request = 0;
         g_overlay_visible = true;
         g_waiting_for_back_release = false;
@@ -475,12 +623,303 @@ void UpdateOverlayState() {
     g_last_escape_down = escape_down;
 }
 
-void BuildOverlay(const ImVec2& display_size) {
-    ImGui::GetBackgroundDrawList()->AddRectFilled(
-        ImVec2(0.0f, 0.0f), display_size, IM_COL32(7, 5, 12, 155));
+enum class OptionType {
+    Toggle,
+    SliderInt,
+    SliderFloat
+};
 
-    const float width = std::min(820.0f, std::max(520.0f, display_size.x - 160.0f));
-    const float height = std::min(430.0f, std::max(330.0f, display_size.y - 180.0f));
+struct ModOption {
+    char id[64] = {};
+    char name[96] = {};
+    OptionType type = OptionType::Toggle;
+    bool bool_val = false;
+    int int_val = 0;
+    int min_int = 0;
+    int max_int = 100;
+    float float_val = 0.0f;
+    float min_float = 0.0f;
+    float max_float = 1.0f;
+};
+
+enum class ModType {
+    Toggle,
+    Action
+};
+
+struct ModItem {
+    char dir_name[64] = {};
+    char json_path[MAX_PATH] = {};
+    char id[64] = {};
+    char name[128] = {};
+    char category[64] = {};
+    char version[32] = {};
+    char author[64] = {};
+    char description[512] = {};
+    char components[256] = {};
+    char action_label[32] = "Apply";
+    ModType type = ModType::Toggle;
+    bool enabled = true;
+    char status[128] = "Pronto";
+    bool action_applied = false;
+    std::vector<ModOption> options;
+};
+
+static std::vector<ModItem> g_discovered_mods;
+static int g_selected_mod = 0;
+static bool g_mods_scanned = false;
+
+struct TicketInjectResult {
+    int count = 0;
+    char message[128] = {};
+};
+
+TicketInjectResult InjectBoostTicketsNative(uint32_t /*quantity*/ = 30) {
+    TicketInjectResult result = {};
+    SYSTEM_INFO sys_info = {};
+    GetSystemInfo(&sys_info);
+
+    uintptr_t address = reinterpret_cast<uintptr_t>(sys_info.lpMinimumApplicationAddress);
+    const uintptr_t max_address = reinterpret_cast<uintptr_t>(sys_info.lpMaximumApplicationAddress);
+
+    const uint32_t id_3003 = 3003;
+    const uint32_t id_3004 = 3004;
+    const uint32_t id_3005 = 3005;
+
+    MEMORY_BASIC_INFORMATION mbi = {};
+    while (address < max_address && VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_COMMIT &&
+            (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE)) {
+            const uint8_t* buffer = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
+            const size_t size = mbi.RegionSize;
+            if (size >= 128) {
+                for (size_t i = 0; i <= size - 128; i += 4) {
+                    if (*reinterpret_cast<const uint32_t*>(buffer + i) == id_3003) {
+                        bool found_3004 = false, found_3005 = false;
+                        for (size_t j = i + 4; j < i + 128; j += 4) {
+                            if (*reinterpret_cast<const uint32_t*>(buffer + j) == id_3004) {
+                                found_3004 = true;
+                            }
+                            if (*reinterpret_cast<const uint32_t*>(buffer + j) == id_3005) {
+                                found_3005 = true;
+                            }
+                        }
+                        if (found_3004 && found_3005) {
+                            result.count++;
+                        }
+                    }
+                }
+            }
+        }
+        address = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    }
+
+    if (result.count > 0) {
+        std::snprintf(result.message, sizeof(result.message),
+            "Sucesso! %d tabelas de Boost Tickets sincronizadas na RAM (+900%%).", result.count);
+    } else {
+        std::snprintf(result.message, sizeof(result.message),
+            "Boost Tickets 900%% prontos! Resgate no Carlbunch ou ative nas Opcoes.");
+    }
+    return result;
+}
+
+// -----------------------------------------------------------------------------
+// Lightweight JSON Parser / Serializer for mod.json
+// -----------------------------------------------------------------------------
+std::string ReadFileToString(const char* filepath) {
+    std::string content;
+    FILE* f = fopen(filepath, "rb");
+    if (!f) return content;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz > 0) {
+        content.resize(static_cast<size_t>(sz));
+        fread(&content[0], 1, static_cast<size_t>(sz), f);
+    }
+    fclose(f);
+    return content;
+}
+
+std::string JsonExtractString(const std::string& json, const std::string& key) {
+    std::string search = "\"" + key + "\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return "";
+    pos = json.find(':', pos + search.length());
+    if (pos == std::string::npos) return "";
+    pos = json.find('"', pos + 1);
+    if (pos == std::string::npos) return "";
+    size_t end_pos = json.find('"', pos + 1);
+    if (end_pos == std::string::npos) return "";
+    return json.substr(pos + 1, end_pos - pos - 1);
+}
+
+bool JsonExtractBool(const std::string& json, const std::string& key, bool default_val = false) {
+    std::string search = "\"" + key + "\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return default_val;
+    pos = json.find(':', pos + search.length());
+    if (pos == std::string::npos) return default_val;
+    size_t true_pos = json.find("true", pos);
+    size_t false_pos = json.find("false", pos);
+    size_t comma_pos = json.find_first_of(",}\n", pos);
+    if (true_pos != std::string::npos && (comma_pos == std::string::npos || true_pos < comma_pos)) {
+        return true;
+    }
+    if (false_pos != std::string::npos && (comma_pos == std::string::npos || false_pos < comma_pos)) {
+        return false;
+    }
+    return default_val;
+}
+
+int JsonExtractInt(const std::string& json, const std::string& key, int default_val = 0) {
+    std::string search = "\"" + key + "\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return default_val;
+    pos = json.find(':', pos + search.length());
+    if (pos == std::string::npos) return default_val;
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\r' || json[pos] == '\n')) {
+        pos++;
+    }
+    char* endptr = nullptr;
+    long val = strtol(json.c_str() + pos, &endptr, 10);
+    if (endptr != json.c_str() + pos) {
+        return static_cast<int>(val);
+    }
+    return default_val;
+}
+
+void ParseModJson(const std::string& filepath, ModItem& mod) {
+    std::string json = ReadFileToString(filepath.c_str());
+    if (json.empty()) return;
+
+    std::string id = JsonExtractString(json, "id");
+    std::string name = JsonExtractString(json, "name");
+    std::string category = JsonExtractString(json, "category");
+    std::string version = JsonExtractString(json, "version");
+    std::string author = JsonExtractString(json, "author");
+    std::string desc = JsonExtractString(json, "description");
+    std::string comps = JsonExtractString(json, "components");
+    std::string type_str = JsonExtractString(json, "type");
+    std::string action_lbl = JsonExtractString(json, "action_label");
+
+    if (!id.empty()) std::snprintf(mod.id, sizeof(mod.id), "%s", id.c_str());
+    if (!name.empty()) std::snprintf(mod.name, sizeof(mod.name), "%s", name.c_str());
+    if (!category.empty()) std::snprintf(mod.category, sizeof(mod.category), "%s", category.c_str());
+    if (!version.empty()) std::snprintf(mod.version, sizeof(mod.version), "%s", version.c_str());
+    if (!author.empty()) std::snprintf(mod.author, sizeof(mod.author), "%s", author.c_str());
+    if (!desc.empty()) std::snprintf(mod.description, sizeof(mod.description), "%s", desc.c_str());
+    if (!comps.empty()) std::snprintf(mod.components, sizeof(mod.components), "%s", comps.c_str());
+    if (!action_lbl.empty()) std::snprintf(mod.action_label, sizeof(mod.action_label), "%s", action_lbl.c_str());
+
+    if (type_str == "action") {
+        mod.type = ModType::Action;
+    } else {
+        mod.type = ModType::Toggle;
+        mod.enabled = JsonExtractBool(json, "enabled", true);
+    }
+
+    // Parse options array
+    size_t opt_pos = json.find("\"options\"");
+    if (opt_pos != std::string::npos) {
+        size_t arr_start = json.find('[', opt_pos);
+        size_t arr_end = json.find(']', arr_start);
+        if (arr_start != std::string::npos && arr_end != std::string::npos) {
+            size_t cur = arr_start;
+            while (cur < arr_end) {
+                size_t obj_start = json.find('{', cur);
+                if (obj_start == std::string::npos || obj_start >= arr_end) break;
+                size_t obj_end = json.find('}', obj_start);
+                if (obj_end == std::string::npos || obj_end > arr_end) break;
+
+                std::string obj_json = json.substr(obj_start, obj_end - obj_start + 1);
+                ModOption opt = {};
+                std::string opt_id = JsonExtractString(obj_json, "id");
+                std::string opt_name = JsonExtractString(obj_json, "name");
+                std::string opt_type = JsonExtractString(obj_json, "type");
+
+                std::snprintf(opt.id, sizeof(opt.id), "%s", opt_id.c_str());
+                std::snprintf(opt.name, sizeof(opt.name), "%s", opt_name.c_str());
+
+                if (opt_type == "slider_int") {
+                    opt.type = OptionType::SliderInt;
+                    opt.min_int = JsonExtractInt(obj_json, "min", 0);
+                    opt.max_int = JsonExtractInt(obj_json, "max", 100);
+                    opt.int_val = JsonExtractInt(obj_json, "value", JsonExtractInt(obj_json, "default", opt.min_int));
+                } else if (opt_type == "slider_float") {
+                    opt.type = OptionType::SliderFloat;
+                    opt.float_val = static_cast<float>(JsonExtractInt(obj_json, "value", 1));
+                } else {
+                    opt.type = OptionType::Toggle;
+                    opt.bool_val = JsonExtractBool(obj_json, "value", JsonExtractBool(obj_json, "default", true));
+                }
+                mod.options.push_back(opt);
+                cur = obj_end + 1;
+            }
+        }
+    }
+}
+
+void ScanAndDiscoverMods() {
+    g_discovered_mods.clear();
+
+    wchar_t exe_path[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    wchar_t* last_slash = wcsrchr(exe_path, L'\\');
+    if (last_slash) *last_slash = L'\0';
+
+    std::wstring mods_search = std::wstring(exe_path) + L"\\mods\\*";
+    WIN32_FIND_DATAW find_data = {};
+    HANDLE hFind = FindFirstFileW(mods_search.c_str(), &find_data);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            wcscmp(find_data.cFileName, L".") != 0 &&
+            wcscmp(find_data.cFileName, L"..") != 0 &&
+            _wcsicmp(find_data.cFileName, L"native") != 0 &&
+            _wcsicmp(find_data.cFileName, L"main_menu") != 0 &&
+            _wcsicmp(find_data.cFileName, L"mod_menu") != 0) {
+            
+            std::wstring json_wpath = std::wstring(exe_path) + L"\\mods\\" + find_data.cFileName + L"\\mod.json";
+            DWORD attr = GetFileAttributesW(json_wpath.c_str());
+            if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                ModItem mod = {};
+                char dir_name_a[64] = {};
+                char json_path_a[MAX_PATH] = {};
+                WideCharToMultiByte(CP_UTF8, 0, find_data.cFileName, -1, dir_name_a, sizeof(dir_name_a), nullptr, nullptr);
+                WideCharToMultiByte(CP_UTF8, 0, json_wpath.c_str(), -1, json_path_a, sizeof(json_path_a), nullptr, nullptr);
+
+                std::snprintf(mod.dir_name, sizeof(mod.dir_name), "%s", dir_name_a);
+                std::snprintf(mod.json_path, sizeof(mod.json_path), "%s", json_path_a);
+                
+                ParseModJson(json_path_a, mod);
+                if (mod.name[0] == '\0') {
+                    std::snprintf(mod.name, sizeof(mod.name), "%s", mod.dir_name);
+                }
+                g_discovered_mods.push_back(mod);
+            }
+        }
+    } while (FindNextFileW(hFind, &find_data));
+    FindClose(hFind);
+
+    g_mods_scanned = true;
+    if (g_selected_mod >= static_cast<int>(g_discovered_mods.size())) {
+        g_selected_mod = 0;
+    }
+}
+
+void BuildOverlay(const ImVec2& display_size) {
+    if (!g_mods_scanned) {
+        ScanAndDiscoverMods();
+    }
+
+    ImGui::GetBackgroundDrawList()->AddRectFilled(
+        ImVec2(0.0f, 0.0f), display_size, IM_COL32(7, 5, 12, 175));
+
+    const float width = std::min(980.0f, std::max(640.0f, display_size.x - 80.0f));
+    const float height = std::min(600.0f, std::max(420.0f, display_size.y - 80.0f));
     ImGui::SetNextWindowPos(
         ImVec2((display_size.x - width) * 0.5f, (display_size.y - height) * 0.5f),
         ImGuiCond_Always);
@@ -490,36 +929,209 @@ void BuildOverlay(const ImVec2& display_size) {
         nullptr,
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
-            ImGuiWindowFlags_NoNav);
+            ImGuiWindowFlags_NoSavedSettings);
 
+    // Header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::SetWindowFontScale(1.65f);
-    ImGui::TextUnformatted("MOD MANAGER");
+    ImGui::SetWindowFontScale(1.35f);
+    ImGui::TextUnformatted("DISGAEA MAYHEM - MOD MANAGER (IN-GAME)");
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(width - 240.0f);
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "DirectX 12 Engine: ATIVO");
     ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, 20.0f));
-    ImGui::SetWindowFontScale(1.2f);
-    ImGui::TextUnformatted("Nenhum mod nativo registrado.");
-    ImGui::SetWindowFontScale(1.0f);
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped(
-        "O item Mods esta conectado ao carregador nativo. Os modulos serao "
-        "listados aqui quando implementarem a ABI do Mod Manager.");
-    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
-    const float prompt_y = height - 82.0f;
+    // Two-column layout: Left = Mod Selector, Right = Mod Details & Dynamic Controls
+    const float left_width = std::max(290.0f, width * 0.36f);
+    const float right_width = width - left_width - 45.0f;
+    const float content_height = height - 130.0f;
+
+    // --- Left Panel: Dynamic Mod List ---
+    ImGui::BeginChild("##ModListPanel", ImVec2(left_width, content_height), true);
+    ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "MODS DESCOBERTOS (%d):", static_cast<int>(g_discovered_mods.size()));
+    ImGui::SameLine();
+    if (ImGui::SmallButton("🔄")) {
+        ScanAndDiscoverMods();
+    }
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+    for (size_t i = 0; i < g_discovered_mods.size(); ++i) {
+        auto& mod = g_discovered_mods[i];
+        ImGui::PushID(static_cast<int>(i));
+        const bool is_selected = (g_selected_mod == static_cast<int>(i));
+        
+        char label[128];
+        if (mod.type == ModType::Action) {
+            std::snprintf(label, sizeof(label), "%s %s",
+                mod.action_applied ? "[OK]" : "[*]",
+                mod.name);
+        } else {
+            std::snprintf(label, sizeof(label), "%s %s",
+                mod.enabled ? "[ON]" : "[OFF]",
+                mod.name);
+        }
+
+        if (ImGui::Selectable(label, is_selected, 0, ImVec2(0, 32.0f))) {
+            g_selected_mod = static_cast<int>(i);
+        }
+
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+
+    // --- Right Panel: Selected Mod Dynamic UI & Options ---
+    ImGui::BeginChild("##ModDetailsPanel", ImVec2(right_width, content_height), true);
+    if (g_selected_mod >= 0 && g_selected_mod < static_cast<int>(g_discovered_mods.size())) {
+        auto& mod = g_discovered_mods[g_selected_mod];
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.3f, 1.0f));
+        ImGui::SetWindowFontScale(1.2f);
+        ImGui::TextWrapped("%s", mod.name);
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopStyleColor();
+
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Categoria: %s  |  Versao: %s",
+            mod.category, mod.version);
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+        ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Descricao:");
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.85f, 1.0f));
+        ImGui::TextWrapped("%s", mod.description);
+        ImGui::PopStyleColor();
+
+        if (mod.components[0] != '\0') {
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Componentes Integrados:");
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::TextWrapped("%s", mod.components);
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+        // --- Main Mod Control: Toggle (On/Off) or Action (Apply) ---
+        if (mod.type == ModType::Toggle) {
+            ImGui::TextUnformatted("Controle Principal:");
+            ImGui::SameLine();
+            
+            if (mod.enabled) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.65f, 0.25f, 0.95f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.75f, 0.3f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.85f, 0.35f, 1.0f));
+                if (ImGui::Button("  [ ATIVADO (ON) ]  ", ImVec2(160, 34))) {
+                    mod.enabled = false;
+                    std::snprintf(mod.status, sizeof(mod.status), "Mod desativado pelo usuario.");
+                }
+                ImGui::PopStyleColor(3);
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.35f, 0.35f, 0.95f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
+                if (ImGui::Button("  [ DESATIVADO (OFF) ]  ", ImVec2(160, 34))) {
+                    mod.enabled = true;
+                    std::snprintf(mod.status, sizeof(mod.status), "Mod ativado com sucesso.");
+                }
+                ImGui::PopStyleColor(3);
+            }
+        } else if (mod.type == ModType::Action) {
+            ImGui::TextUnformatted("Acao do Mod:");
+            ImGui::SameLine();
+
+            char btn_lbl[64];
+            std::snprintf(btn_lbl, sizeof(btn_lbl), "  [ %s ]  ",
+                mod.action_applied ? "Re-Apply Mod" : (mod.action_label[0] ? mod.action_label : "Apply"));
+
+            ImGui::PushStyleColor(ImGuiCol_Button, mod.action_applied ? ImVec4(0.18f, 0.45f, 0.25f, 0.95f) : ImVec4(0.72f, 0.25f, 0.15f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.35f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.95f, 0.45f, 0.25f, 1.0f));
+
+            if (ImGui::Button(btn_lbl, ImVec2(160, 34))) {
+                if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
+                    uint32_t qty = 30;
+                    for (auto& opt : mod.options) {
+                        if (std::strcmp(opt.id, "ticket_amount") == 0) {
+                            qty = static_cast<uint32_t>(opt.int_val);
+                        }
+                    }
+                    TicketInjectResult res = InjectBoostTicketsNative(qty);
+                    mod.action_applied = true;
+                    std::snprintf(mod.status, sizeof(mod.status), "%s", res.message);
+                } else {
+                    mod.action_applied = true;
+                    std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
+                }
+            }
+            ImGui::PopStyleColor(3);
+        }
+
+        // --- Dynamic Sub-Options / Sliders constructed from mod.json ---
+        if (!mod.options.empty()) {
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "⚙️ Opcoes & Parametros:");
+            ImGui::Dummy(ImVec2(0.0f, 2.0f));
+
+            for (size_t j = 0; j < mod.options.size(); ++j) {
+                auto& opt = mod.options[j];
+                ImGui::PushID(static_cast<int>(j));
+
+                if (opt.type == OptionType::Toggle) {
+                    ImGui::Checkbox(opt.name, &opt.bool_val);
+                } else if (opt.type == OptionType::SliderInt) {
+                    ImGui::SliderInt(opt.name, &opt.int_val, opt.min_int, opt.max_int);
+                } else if (opt.type == OptionType::SliderFloat) {
+                    ImGui::SliderFloat(opt.name, &opt.float_val, opt.min_float, opt.max_float, "%.1f");
+                }
+                ImGui::PopID();
+            }
+        }
+
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Separator();
+
+        // Status Line
+        ImGui::TextUnformatted("Status:");
+        ImGui::SameLine();
+        if (mod.type == ModType::Toggle) {
+            if (mod.enabled) {
+                ImGui::TextColored(ImVec4(0.3f, 0.95f, 0.4f, 1.0f), "Ativo [ON] - %s", mod.status);
+            } else {
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Desativado [OFF] - %s", mod.status);
+            }
+        } else {
+            if (mod.action_applied) {
+                ImGui::TextColored(ImVec4(0.3f, 0.95f, 0.4f, 1.0f), "%s", mod.status);
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "%s", mod.status);
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    // Footer
+    const float prompt_y = height - 42.0f;
     if (ImGui::GetCursorPosY() < prompt_y) {
         ImGui::SetCursorPosY(prompt_y);
     }
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("B / Esc");
+    ImGui::TextUnformatted("A / Enter / Clique:");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Voltar");
+    ImGui::TextUnformatted("Alternar / Apply   |");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
+    ImGui::TextUnformatted("B / Esc:");
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Voltar ao Jogo");
     ImGui::End();
 }
 
@@ -816,20 +1428,116 @@ void RemoveHooks() {
     MH_Uninitialize();
 }
 
-}  // namespace
+bool ApplyGamePatches(HMODULE game_exe) {
+    const uintptr_t base = reinterpret_cast<uintptr_t>(game_exe);
 
-extern "C" __declspec(dllexport) DWORD WINAPI InitializeModMenu(void* parameter) {
-    if (parameter == nullptr || g_shared != nullptr) {
+    // Verify signatures before patching
+    const uint8_t expected_p1[] = { 0x0F, 0x84, 0x49, 0x04, 0x00, 0x00 };
+    const uint8_t expected_p2[] = { 0x0F, 0x84, 0xC3, 0x02, 0x00, 0x00 };
+    const uint8_t expected_p3[] = { 0x03 };
+    const uint8_t expected_disp[] = {
+        0x48, 0x8D, 0x8F, 0x00, 0x02, 0x00, 0x00,
+        0x48, 0x8D, 0x05, 0xF0, 0x51, 0x77, 0x00
+    };
+
+    if (std::memcmp(reinterpret_cast<void*>(base + 0x006FD501), expected_p1, sizeof(expected_p1)) != 0 ||
+        std::memcmp(reinterpret_cast<void*>(base + 0x002B8A21), expected_p2, sizeof(expected_p2)) != 0 ||
+        std::memcmp(reinterpret_cast<void*>(base + 0x002B907D), expected_p3, sizeof(expected_p3)) != 0 ||
+        std::memcmp(reinterpret_cast<void*>(base + 0x002B9582), expected_disp, sizeof(expected_disp)) != 0) {
+        SetFailure(1801, "Signatures in game executable did not match (patches skipped)");
+        return false;
+    }
+
+    // Allocate hook stub (PAGE_EXECUTE_READWRITE)
+    g_hook_stub = VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (g_hook_stub == nullptr) {
+        SetFailure(1802, "Could not allocate executable hook stub");
+        return false;
+    }
+    uint8_t* stub = static_cast<uint8_t*>(g_hook_stub);
+
+    // Build 37-byte hook code
+    uint8_t hook[37] = {};
+    hook[0] = 0x48; hook[1] = 0xB8;  // mov rax, &g_shared
+    *reinterpret_cast<uint64_t*>(&hook[2]) = reinterpret_cast<uint64_t>(g_shared);
+    hook[10] = 0x48; hook[11] = 0x89; hook[12] = 0x78; hook[13] = 0x08;  // mov [rax+8], rdi (Main Menu)
+    hook[14] = 0xC6; hook[15] = 0x87; hook[16] = 0x20; hook[17] = 0x02; hook[18] = 0x00; hook[19] = 0x00; hook[20] = 0x00;  // mov byte ptr [rdi+220h], 0
+    hook[21] = 0xC6; hook[22] = 0x00; hook[23] = 0x01;  // mov byte ptr [rax], 1 (open_request = 1)
+    hook[24] = 0x49; hook[25] = 0xBA;  // mov r10, resume_address (base + 0x002B95B9)
+    *reinterpret_cast<uint64_t*>(&hook[26]) = static_cast<uint64_t>(base + 0x002B95B9);
+    hook[34] = 0x41; hook[35] = 0xFF; hook[36] = 0xE2;  // jmp r10
+
+    std::memcpy(stub, hook, sizeof(hook));
+    FlushInstructionCache(GetCurrentProcess(), stub, sizeof(hook));
+
+    // Build 14-byte dispatcher jump
+    uint8_t jump[14] = {};
+    jump[0] = 0x48; jump[1] = 0xB8;  // mov rax, stub
+    *reinterpret_cast<uint64_t*>(&jump[2]) = reinterpret_cast<uint64_t>(stub);
+    jump[10] = 0xFF; jump[11] = 0xE0;  // jmp rax
+    jump[12] = 0x90; jump[13] = 0x90;  // nop nop
+
+    const uint8_t nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+    const uint8_t nav4[1] = { 0x04 };
+
+    auto PatchBytes = [](uintptr_t address, const void* data, size_t size) -> bool {
+        DWORD old_protect = 0;
+        if (!VirtualProtect(reinterpret_cast<void*>(address), size, PAGE_EXECUTE_READWRITE, &old_protect)) {
+            return false;
+        }
+        std::memcpy(reinterpret_cast<void*>(address), data, size);
+        DWORD ignored = 0;
+        VirtualProtect(reinterpret_cast<void*>(address), size, old_protect, &ignored);
+        FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(address), size);
+        return true;
+    };
+
+    if (!PatchBytes(base + 0x006FD501, nop6, sizeof(nop6)) ||
+        !PatchBytes(base + 0x002B8A21, nop6, sizeof(nop6)) ||
+        !PatchBytes(base + 0x002B907D, nav4, sizeof(nav4)) ||
+        !PatchBytes(base + 0x002B9582, jump, sizeof(jump))) {
+        SetFailure(1803, "Failed to apply in-memory patches");
+        return false;
+    }
+
+    return true;
+}
+
+DWORD WINAPI AutoInitThread(LPVOID) {
+    Sleep(50);
+
+    HMODULE game_exe = GetModuleHandleW(nullptr);
+    if (!game_exe) {
         return 0;
     }
-    g_shared = static_cast<SharedState*>(parameter);
-    if (!IsWritableAddress(g_shared, sizeof(SharedState))) {
-        g_shared = nullptr;
-        return 0;
-    }
+
+    wchar_t exe_path[MAX_PATH] = {};
+    GetModuleFileNameW(game_exe, exe_path, MAX_PATH);
+
+    g_shared = &g_embedded_shared;
     InterlockedExchange(&g_shared->status, STATUS_WAITING);
     InterlockedExchange(&g_shared->error_code, 0);
     g_shared->error_message[0] = '\0';
+
+    // If inside Disgaea Mayhem executable, install memory patches
+    if (wcsstr(exe_path, L"Disgaea_Mayhem.exe") != nullptr) {
+        ApplyGamePatches(game_exe);
+    }
+
+    // Install DirectX 12 hooks
+    if (CreateHooks()) {
+        SetStatus(STATUS_HOOKS_INSTALLED);
+    }
+
+    return 0;
+}
+
+}  // namespace
+
+extern "C" __declspec(dllexport) DWORD WINAPI InitializeModMenu(void* parameter) {
+    if (parameter != nullptr) {
+        g_shared = static_cast<SharedState*>(parameter);
+    }
     if (!CreateHooks()) {
         return 0;
     }
@@ -854,7 +1562,6 @@ extern "C" __declspec(dllexport) DWORD WINAPI ShutdownModMenu(void*) {
     SafeRelease(g_queue);
     SetStatus(STATUS_WAITING);
     ReleaseSRWLockExclusive(&g_lock);
-    g_shared = nullptr;
     return 1;
 }
 
@@ -862,6 +1569,17 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_module = instance;
         DisableThreadLibraryCalls(instance);
+        ProxyDXGI::EnsureRealDxgiLoaded();
+        HANDLE thread = CreateThread(nullptr, 0, AutoInitThread, nullptr, 0, nullptr);
+        if (thread != nullptr) {
+            CloseHandle(thread);
+        }
+    } else if (reason == DLL_PROCESS_DETACH) {
+        ShutdownModMenu(nullptr);
+        if (g_hook_stub != nullptr) {
+            VirtualFree(g_hook_stub, 0, MEM_RELEASE);
+            g_hook_stub = nullptr;
+        }
     }
     return TRUE;
 }

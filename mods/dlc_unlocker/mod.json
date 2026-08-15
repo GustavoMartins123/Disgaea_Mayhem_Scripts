@@ -1,0 +1,22 @@
+{
+  "id": "dlc_boost_unlocker",
+  "name": "DLCs, Microtransações & Boost Tickets 900%",
+  "category": "Recursos & Inventário",
+  "version": "1.2.0",
+  "author": "Disgaea Mayhem Mod Team",
+  "description": "Emula ISteamApps e ISteamInventory via SmokeAPI, converte consumíveis para resgate offline infinito no NPC Carlbunch e sincroniza 30x Boost Tickets com multiplicador de +900% na sessão ativa.",
+  "type": "action",
+  "action_label": "Apply",
+  "components": "SmokeAPI Wrapper + Inventário Extra [1,2,3,4,5] + Tabelas Offline + Sincronizador RAM",
+  "options": [
+    {
+      "id": "ticket_amount",
+      "name": "Quantidade de Boost Tickets (900%)",
+      "type": "slider_int",
+      "min": 10,
+      "max": 99,
+      "default": 30,
+      "value": 30
+    }
+  ]
+}

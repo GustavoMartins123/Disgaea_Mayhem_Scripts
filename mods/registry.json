@@ -1,4 +1,63 @@
 {
   "schema_version": 1,
-  "mods": []
+  "mods": [
+    {
+      "id": "dlc_boost_unlocker",
+      "name": "DLCs, Microtransações & Boost Tickets 900%",
+      "category": "Recursos & Inventário",
+      "version": "1.2.0",
+      "author": "Disgaea Mayhem Mod Team",
+      "type": "action",
+      "action_label": "Apply",
+      "description": "Emula ISteamApps e ISteamInventory via SmokeAPI, converte consumíveis para resgate offline infinito no NPC Carlbunch e sincroniza 30x Boost Tickets com multiplicador de +900% diretamente na sessão ativa.",
+      "components": [
+        "SmokeAPI (steam_api64.dll wrapper)",
+        "SmokeAPI.config.json (inventário extra [1, 2, 3, 4, 5])",
+        "Tabelas offline: DLC_information.dat, DLC_BoostTicket.dat, DLC_delivery.dat",
+        "Sincronizador nativo de memória RAM (+900% boost)"
+      ]
+    },
+    {
+      "id": "dark_assembly_approval",
+      "name": "Dark Assembly - Aprovação 100% dos Senadores",
+      "category": "Qualidade de Vida (QoL)",
+      "version": "1.0.0",
+      "author": "Disgaea Mayhem Mod Team",
+      "type": "action",
+      "action_label": "Apply",
+      "description": "Aprova instantaneamente todas as propostas, desejos e leis na Assembleia Sombria com 100% de votos favoráveis, sem necessidade de suborno ou combate.",
+      "components": [
+        "Tabela de desejos: database_mods/wish.dat",
+        "Override nativo de aprovação de senadores"
+      ]
+    },
+    {
+      "id": "cheat_shop_expander",
+      "name": "Cheat Shop Ilimitado (+5000% EXP/Mana/HL/Drops)",
+      "category": "Balanceamento & Trapaças",
+      "version": "1.0.0",
+      "author": "Disgaea Mayhem Mod Team",
+      "type": "action",
+      "action_label": "Apply",
+      "description": "Expande o limite de pontos e multiplicadores no NPC de Trapaças (Cheat Shop) para até +5.000% de bônus e ajusta as estrelas de dificuldade dos inimigos.",
+      "components": [
+        "Tabela de trapaças: database_mods/cheatSetting.dat",
+        "Controle de limites de pontos da base"
+      ]
+    },
+    {
+      "id": "item_world_speedup",
+      "name": "Item World - Multiplicador de Nível Acelerado (+5 Lv)",
+      "category": "Item World",
+      "version": "1.0.0",
+      "author": "Disgaea Mayhem Mod Team",
+      "type": "action",
+      "action_label": "Apply",
+      "description": "Acelera a evolução de armas e armaduras no Mundo dos Itens, concedendo +5 a +10 níveis a cada andar concluído.",
+      "components": [
+        "Script de progressão do Item World",
+        "Hook de finalização de andar"
+      ]
+    }
+  ]
 }

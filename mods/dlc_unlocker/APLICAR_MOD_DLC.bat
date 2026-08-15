@@ -1,5 +1,5 @@
 @echo off
-title Mod DLCs Ilimitadas - Disgaea Mayhem
+setlocal
 cd /d "%~dp0"
 python APLICAR_MOD_DLC.py
 echo.

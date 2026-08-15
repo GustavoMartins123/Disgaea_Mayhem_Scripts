@@ -2,14 +2,21 @@ import os
 import shutil
 import json
 import struct
+from pathlib import Path
 
-print("="*60)
+print("=" * 60)
 print("  DISGAEA MAYHEM - MOD DE RESGATE DE DLCS ILIMITADAS")
-print("="*60)
+print("=" * 60)
 
-game_dir = os.path.dirname(os.path.abspath(__file__))
-db_dir = os.path.join(game_dir, "data", "database")
-backup_dir = os.path.join(game_dir, "data", "database_backup")
+def find_game_root() -> Path:
+    current = Path(__file__).resolve().parent
+    for p in [current, current.parent, current.parent.parent]:
+        if (p / "Disgaea_Mayhem.exe").is_file():
+            return p
+    return current
+
+game_dir = find_game_root()
+db_dir = game_dir / "data" / "database"
 
 # 1. Configurar SmokeAPI.config.json
 smoke_config = {
@@ -25,13 +32,13 @@ smoke_config = {
   "extra_dlcs": {}
 }
 
-config_path = os.path.join(game_dir, "SmokeAPI.config.json")
+config_path = game_dir / "SmokeAPI.config.json"
 with open(config_path, "w", encoding="utf-8") as f:
     json.dump(smoke_config, f, indent=2)
 print("[OK] SmokeAPI.config.json configurado com sucesso.")
 
 # 2. Patch em DLC_information.dat (converter consumiveis para Tipo 1 offline)
-info_path = os.path.join(db_dir, "DLC_information.dat")
+info_path = db_dir / "DLC_information.dat"
 with open(info_path, "rb") as f:
     data = bytearray(f.read())
 
@@ -49,7 +56,7 @@ for sym, item_id, item_str in items:
         id_bytes = struct.pack("<I", item_id)
         p_id = data.find(id_bytes, p + len(sym))
         p_type = p_id - 4
-        struct.pack_into("<I", data, p_type, 1) # Tipo 1
+        struct.pack_into("<I", data, p_type, 1)  # Tipo 1 offline
         p_str = data.find(item_str, p)
         while p_str != -1 and p_str < p + 160:
             l = len(item_str)
@@ -62,7 +69,7 @@ with open(info_path, "wb") as f:
 print("[OK] DLC_information.dat configurado para resgate offline sem erros de rede.")
 
 # 3. Patch em DLC_BoostTicket.dat (todos os tickets com +900%)
-boost_path = os.path.join(db_dir, "DLC_BoostTicket.dat")
+boost_path = db_dir / "DLC_BoostTicket.dat"
 with open(boost_path, "rb") as f:
     b_data = bytearray(f.read())
 
@@ -77,6 +84,6 @@ with open(boost_path, "wb") as f:
     f.write(b_data)
 print("[OK] DLC_BoostTicket.dat configurado (multiplicador 9x / 900% em todos os tickets).")
 
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("  TUDO PRONTO! Agora voce pode resgatar quando quiser no NPC Carlbunch.")
-print("="*60)
+print("=" * 60)

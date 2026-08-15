@@ -1,0 +1,40 @@
+{
+  "id": "cheat_shop_expander",
+  "name": "Cheat Shop Ilimitado (+5000% Cap)",
+  "category": "Balanceamento & Trapaças",
+  "version": "1.0.0",
+  "author": "Disgaea Mayhem Mod Team",
+  "description": "Expande o limite de pontos e multiplicadores no NPC de Trapaças (Cheat Shop) para até +5.000% de bônus de EXP, Mana, HL e Drops, além de controle avançado de estrelas de dificuldade dos inimigos.",
+  "type": "toggle",
+  "enabled": true,
+  "components": "Tabela de trapaças (cheatSetting.dat) + Limites de pontos",
+  "options": [
+    {
+      "id": "exp_cap",
+      "name": "Multiplicador Máximo de EXP (%)",
+      "type": "slider_int",
+      "min": 100,
+      "max": 5000,
+      "default": 5000,
+      "value": 5000
+    },
+    {
+      "id": "mana_cap",
+      "name": "Multiplicador Máximo de Mana (%)",
+      "type": "slider_int",
+      "min": 100,
+      "max": 5000,
+      "default": 5000,
+      "value": 5000
+    },
+    {
+      "id": "hl_cap",
+      "name": "Multiplicador Máximo de HL Dinheiro (%)",
+      "type": "slider_int",
+      "min": 100,
+      "max": 5000,
+      "default": 5000,
+      "value": 5000
+    }
+  ]
+}
