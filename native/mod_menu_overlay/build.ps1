@@ -75,20 +75,40 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Deploy to game directories
-$gameNativeDll = Join-Path $gameRoot 'mods\native\DisgaeaMayhemModMenu.dll'
-$gameDxgiDll = Join-Path $gameRoot 'dxgi.dll'
+$targets = [System.Collections.Generic.List[string]]::new()
+$targets.Add($gameRoot.ToString())
 
-try {
-    Copy-Item $output -Destination $gameNativeDll -Force
-} catch {
-    Write-Warning "mods\native\DisgaeaMayhemModMenu.dll em uso pelo jogo."
+$steamGamePaths = @(
+    'E:\Steam\steamapps\common\Disgaea Mayhem',
+    'C:\Program Files (x86)\Steam\steamapps\common\Disgaea Mayhem',
+    'D:\Steam\steamapps\common\Disgaea Mayhem',
+    'D:\SteamLibrary\steamapps\common\Disgaea Mayhem',
+    'E:\SteamLibrary\steamapps\common\Disgaea Mayhem'
+)
+
+foreach ($p in $steamGamePaths) {
+    if ((Test-Path (Join-Path $p 'Disgaea_Mayhem.exe')) -and ($p -ne $gameRoot.ToString())) {
+        $targets.Add($p)
+    }
 }
 
-try {
-    Copy-Item $output -Destination $gameDxgiDll -Force
-    Write-Host "[OK] Proxy de auto-inicializacao atualizado: $gameDxgiDll"
-} catch {
-    Write-Warning "dxgi.dll em uso pelo jogo (feche o jogo para atualizar o arquivo)."
+foreach ($target in $targets) {
+    $targetNativeDll = Join-Path $target 'mods\native\DisgaeaMayhemModMenu.dll'
+    $targetDxgiDll = Join-Path $target 'dxgi.dll'
+    
+    try {
+        New-Item -ItemType Directory -Force (Join-Path $target 'mods\native') | Out-Null
+        Copy-Item $output -Destination $targetNativeDll -Force
+    } catch {
+        Write-Warning "mods\native\DisgaeaMayhemModMenu.dll em uso em $target."
+    }
+
+    try {
+        Copy-Item $output -Destination $targetDxgiDll -Force
+        Write-Host "[OK] Proxy de auto-inicializacao atualizado em: $targetDxgiDll"
+    } catch {
+        Write-Warning "dxgi.dll em uso pelo jogo em $target (feche o jogo para atualizar o arquivo)."
+    }
 }
 
 Write-Host "[OK] DLL nativo compilado com sucesso: $output"

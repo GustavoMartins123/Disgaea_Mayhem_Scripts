@@ -395,6 +395,77 @@ bool WaitForOverlayGpu() {
     return WaitForFenceValue(value);
 }
 
+static WNDPROC g_original_wndproc = nullptr;
+
+LRESULT CALLBACK ModMenuWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    if (g_imgui_context_created && g_overlay_visible) {
+        ImGuiIO& io = ImGui::GetIO();
+        
+        switch (msg) {
+            case WM_LBUTTONDOWN:
+            case WM_LBUTTONDBLCLK:
+                io.AddMouseButtonEvent(0, true);
+                return 0;
+            case WM_LBUTTONUP:
+                io.AddMouseButtonEvent(0, false);
+                return 0;
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONDBLCLK:
+                io.AddMouseButtonEvent(1, true);
+                return 0;
+            case WM_RBUTTONUP:
+                io.AddMouseButtonEvent(1, false);
+                return 0;
+            case WM_MOUSEMOVE: {
+                const float x = static_cast<float>(static_cast<short>(LOWORD(lparam)));
+                const float y = static_cast<float>(static_cast<short>(HIWORD(lparam)));
+                io.AddMousePosEvent(x, y);
+                return 0;
+            }
+            case WM_MOUSEWHEEL: {
+                const float delta = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
+                io.AddMouseWheelEvent(0.0f, delta);
+                return 0;
+            }
+            case WM_KEYDOWN:
+            case WM_SYSKEYDOWN: {
+                if (wparam == VK_RETURN) io.AddKeyEvent(ImGuiKey_Enter, true);
+                else if (wparam == VK_SPACE) io.AddKeyEvent(ImGuiKey_Space, true);
+                else if (wparam == VK_ESCAPE) io.AddKeyEvent(ImGuiKey_Escape, true);
+                else if (wparam == VK_UP) io.AddKeyEvent(ImGuiKey_UpArrow, true);
+                else if (wparam == VK_DOWN) io.AddKeyEvent(ImGuiKey_DownArrow, true);
+                else if (wparam == VK_LEFT) io.AddKeyEvent(ImGuiKey_LeftArrow, true);
+                else if (wparam == VK_RIGHT) io.AddKeyEvent(ImGuiKey_RightArrow, true);
+                else if (wparam == VK_TAB) io.AddKeyEvent(ImGuiKey_Tab, true);
+                return 0;
+            }
+            case WM_KEYUP:
+            case WM_SYSKEYUP: {
+                if (wparam == VK_RETURN) io.AddKeyEvent(ImGuiKey_Enter, false);
+                else if (wparam == VK_SPACE) io.AddKeyEvent(ImGuiKey_Space, false);
+                else if (wparam == VK_ESCAPE) io.AddKeyEvent(ImGuiKey_Escape, false);
+                else if (wparam == VK_UP) io.AddKeyEvent(ImGuiKey_UpArrow, false);
+                else if (wparam == VK_DOWN) io.AddKeyEvent(ImGuiKey_DownArrow, false);
+                else if (wparam == VK_LEFT) io.AddKeyEvent(ImGuiKey_LeftArrow, false);
+                else if (wparam == VK_RIGHT) io.AddKeyEvent(ImGuiKey_RightArrow, false);
+                else if (wparam == VK_TAB) io.AddKeyEvent(ImGuiKey_Tab, false);
+                return 0;
+            }
+            case WM_CHAR: {
+                if (wparam > 0 && wparam < 0x10000) {
+                    io.AddInputCharacter(static_cast<unsigned int>(wparam));
+                }
+                return 0;
+            }
+            case WM_SETCURSOR: {
+                SetCursor(LoadCursor(nullptr, IDC_ARROW));
+                return TRUE;
+            }
+        }
+    }
+    return CallWindowProcW(g_original_wndproc, hwnd, msg, wparam, lparam);
+}
+
 void DestroyRenderer() {
     if (g_fence != nullptr && g_queue != nullptr) {
         WaitForOverlayGpu();
@@ -428,6 +499,10 @@ void DestroyRenderer() {
     g_next_fence_value = 0;
     g_srv_increment = 0;
     g_rtv_format = DXGI_FORMAT_UNKNOWN;
+    if (g_output_window != nullptr && g_original_wndproc != nullptr) {
+        SetWindowLongPtrW(g_output_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_original_wndproc));
+        g_original_wndproc = nullptr;
+    }
     g_output_window = nullptr;
     g_overlay_visible = false;
     g_waiting_for_back_release = false;
@@ -554,8 +629,18 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableSetMousePos;
+
+    if (g_output_window != nullptr && g_original_wndproc == nullptr) {
+        g_original_wndproc = reinterpret_cast<WNDPROC>(
+            SetWindowLongPtrW(g_output_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(ModMenuWndProc))
+        );
+    }
+
     ImFontConfig font_config;
-    font_config.SizePixels = 22.0f;
+    font_config.SizePixels = 20.0f;
     if (io.Fonts->AddFontDefault(&font_config) == nullptr) {
         SetFailure(1207, "Could not create the Mod Manager font");
         DestroyRenderer();
@@ -566,8 +651,8 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
     ImGui::StyleColorsDark(&style);
     style.WindowRounding = 10.0f;
     style.FrameRounding = 6.0f;
-    style.WindowPadding = ImVec2(30.0f, 26.0f);
-    style.ItemSpacing = ImVec2(10.0f, 14.0f);
+    style.WindowPadding = ImVec2(24.0f, 22.0f);
+    style.ItemSpacing = ImVec2(10.0f, 12.0f);
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.055f, 0.045f, 0.075f, 0.98f);
     style.Colors[ImGuiCol_Border] = ImVec4(1.0f, 0.56f, 0.10f, 0.92f);
     style.Colors[ImGuiCol_Separator] = ImVec4(0.72f, 0.18f, 0.25f, 0.9f);
@@ -910,6 +995,33 @@ void ScanAndDiscoverMods() {
     }
 }
 
+void UpdateGamepadIO() {
+    if (!g_overlay_visible) return;
+    ImGuiIO& io = ImGui::GetIO();
+    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) {
+        XINPUT_STATE state = {};
+        if (XInputGetState(i, &state) == ERROR_SUCCESS) {
+            WORD b = state.Gamepad.wButtons;
+            io.AddKeyEvent(ImGuiKey_GamepadDpadUp, (b & XINPUT_GAMEPAD_DPAD_UP) != 0);
+            io.AddKeyEvent(ImGuiKey_GamepadDpadDown, (b & XINPUT_GAMEPAD_DPAD_DOWN) != 0);
+            io.AddKeyEvent(ImGuiKey_GamepadDpadLeft, (b & XINPUT_GAMEPAD_DPAD_LEFT) != 0);
+            io.AddKeyEvent(ImGuiKey_GamepadDpadRight, (b & XINPUT_GAMEPAD_DPAD_RIGHT) != 0);
+            io.AddKeyEvent(ImGuiKey_GamepadFaceDown, (b & XINPUT_GAMEPAD_A) != 0); // A button
+            io.AddKeyEvent(ImGuiKey_GamepadFaceRight, (b & XINPUT_GAMEPAD_B) != 0); // B button
+            io.AddKeyEvent(ImGuiKey_GamepadFaceLeft, (b & XINPUT_GAMEPAD_X) != 0);
+            io.AddKeyEvent(ImGuiKey_GamepadFaceUp, (b & XINPUT_GAMEPAD_Y) != 0);
+
+            SHORT lx = state.Gamepad.sThumbLX;
+            SHORT ly = state.Gamepad.sThumbLY;
+            io.AddKeyEvent(ImGuiKey_GamepadLStickUp, ly > 18000);
+            io.AddKeyEvent(ImGuiKey_GamepadLStickDown, ly < -18000);
+            io.AddKeyEvent(ImGuiKey_GamepadLStickLeft, lx < -18000);
+            io.AddKeyEvent(ImGuiKey_GamepadLStickRight, lx > 18000);
+            break;
+        }
+    }
+}
+
 void BuildOverlay(const ImVec2& display_size) {
     if (!g_mods_scanned) {
         ScanAndDiscoverMods();
@@ -918,8 +1030,8 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::GetBackgroundDrawList()->AddRectFilled(
         ImVec2(0.0f, 0.0f), display_size, IM_COL32(7, 5, 12, 175));
 
-    const float width = std::min(980.0f, std::max(640.0f, display_size.x - 80.0f));
-    const float height = std::min(600.0f, std::max(420.0f, display_size.y - 80.0f));
+    const float width = std::min(1080.0f, std::max(680.0f, display_size.x * 0.72f));
+    const float height = std::min(680.0f, std::max(460.0f, display_size.y * 0.76f));
     ImGui::SetNextWindowPos(
         ImVec2((display_size.x - width) * 0.5f, (display_size.y - height) * 0.5f),
         ImGuiCond_Always);
@@ -933,7 +1045,7 @@ void BuildOverlay(const ImVec2& display_size) {
 
     // Header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::SetWindowFontScale(1.35f);
+    ImGui::SetWindowFontScale(1.3f);
     ImGui::TextUnformatted("DISGAEA MAYHEM - MOD MANAGER (IN-GAME)");
     ImGui::SetWindowFontScale(1.0f);
     ImGui::PopStyleColor();
@@ -944,9 +1056,8 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
     // Two-column layout: Left = Mod Selector, Right = Mod Details & Dynamic Controls
-    const float left_width = std::max(290.0f, width * 0.36f);
-    const float right_width = width - left_width - 45.0f;
-    const float content_height = height - 130.0f;
+    const float left_width = 300.0f;
+    const float content_height = height - 120.0f;
 
     // --- Left Panel: Dynamic Mod List ---
     ImGui::BeginChild("##ModListPanel", ImVec2(left_width, content_height), true);
@@ -985,18 +1096,18 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::SameLine();
 
     // --- Right Panel: Selected Mod Dynamic UI & Options ---
-    ImGui::BeginChild("##ModDetailsPanel", ImVec2(right_width, content_height), true);
+    ImGui::BeginChild("##ModDetailsPanel", ImVec2(0.0f, content_height), true);
     if (g_selected_mod >= 0 && g_selected_mod < static_cast<int>(g_discovered_mods.size())) {
         auto& mod = g_discovered_mods[g_selected_mod];
 
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.3f, 1.0f));
-        ImGui::SetWindowFontScale(1.2f);
+        ImGui::SetWindowFontScale(1.15f);
         ImGui::TextWrapped("%s", mod.name);
         ImGui::SetWindowFontScale(1.0f);
         ImGui::PopStyleColor();
 
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Categoria: %s  |  Versao: %s",
-            mod.category, mod.version);
+        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Categoria: %s", mod.category);
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.65f, 1.0f), "Versao: %s  |  Autor: %s", mod.version, mod.author);
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
@@ -1085,9 +1196,15 @@ void BuildOverlay(const ImVec2& display_size) {
                 if (opt.type == OptionType::Toggle) {
                     ImGui::Checkbox(opt.name, &opt.bool_val);
                 } else if (opt.type == OptionType::SliderInt) {
-                    ImGui::SliderInt(opt.name, &opt.int_val, opt.min_int, opt.max_int);
+                    ImGui::TextUnformatted(opt.name);
+                    ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
+                    ImGui::SliderInt("##slider", &opt.int_val, opt.min_int, opt.max_int);
+                    ImGui::PopItemWidth();
                 } else if (opt.type == OptionType::SliderFloat) {
-                    ImGui::SliderFloat(opt.name, &opt.float_val, opt.min_float, opt.max_float, "%.1f");
+                    ImGui::TextUnformatted(opt.name);
+                    ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
+                    ImGui::SliderFloat("##slider", &opt.float_val, opt.min_float, opt.max_float, "%.1f");
+                    ImGui::PopItemWidth();
                 }
                 ImGui::PopID();
             }
@@ -1176,6 +1293,9 @@ bool RenderFrame() {
         io.DeltaTime = 1.0f / 60.0f;
     }
     g_last_counter = now;
+    io.MouseDrawCursor = g_overlay_visible;
+    UpdateGamepadIO();
+
     ImGui_ImplDX12_NewFrame();
     ImGui::NewFrame();
     BuildOverlay(io.DisplaySize);
