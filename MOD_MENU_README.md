@@ -1,49 +1,52 @@
 # Mod Menu de Disgaea Mayhem
 
-O Main Menu e construído em C++, não pelos scripts Lua em `data/script`. Esta
-implementação cria o quinto item nativo abaixo de **System**, troca o rótulo
-reservado de **Give Up** por **Mods** no atlas e intercepta somente o callback
-do índice 4.
+O Main Menu e construido em C++, nao pelos scripts Lua em `data/script`. Esta
+implementacao cria o quinto item nativo abaixo de **System**, troca o rotulo
+reservado de **Give Up** por **Mods** no atlas e conecta o indice 4 a um Mod
+Manager renderizado no backbuffer DirectX 12 do proprio jogo.
 
 ## Uso
 
 1. Feche o jogo e execute `INSTALAR_MOD_MENU.bat` uma vez.
 2. Abra o jogo pela Steam, carregue o save e mantenha o Main Menu fechado.
-3. Execute `INJETAR_MOD_MENU.bat` e aguarde a confirmação dos quatro patches.
-4. Abra o Main Menu.
-5. Mantenha o monitor aberto até encerrar o jogo.
+3. Execute `INJETAR_MOD_MENU.bat` e aguarde a confirmacao do renderer e dos
+   quatro patches.
+4. Abra o Main Menu e selecione **Mods**.
+5. Mantenha o monitor aberto ate encerrar o jogo.
 
-Não execute o injetor durante a tela inicial: nesta instalação a Steam encerra
-o primeiro processo e cria o processo definitivo do jogo. O injetor não tenta
-reatar a outra instância; ele encerra explicitamente se o processo conectado
-terminar.
+Enquanto o Mod Manager estiver aberto, a entrada do Main Menu fica bloqueada
+sem ocultar seus elementos. **B** ou **Esc** fecha o gerenciador. A entrada do
+jogo so e reativada depois que o botao for solto, impedindo que o mesmo comando
+tambem feche o Main Menu.
 
-O injetor registra explicitamente o estado nativo de animação 4 que o jogo
-normalmente omite fora dos contextos de **Give Up**. Ele aceita somente o
-executável e o atlas conhecidos por SHA-256, valida as assinaturas nativas antes
-de escrever na memória e encerra com
-erro explícito diante de qualquer divergência. Todas as threads enumeradas do
-jogo ficam suspensas apenas durante a escrita e voltam a executar depois da
-verificação, evitando instruções parcialmente alteradas.
+Nao execute o injetor durante a tela inicial: nesta instalacao a Steam encerra
+o primeiro processo e cria o processo definitivo do jogo. O injetor encerra
+explicitamente se o processo conectado terminar.
 
-O índice 4 originalmente implementa **Give Up** em contextos de batalha. Nesses
-contextos, a função continua acessível dentro de Mods pelo botão **Give Up
-original**. Depois de acioná-lo, pressione **Confirm** novamente no jogo em até
-dez segundos; essa segunda confirmação volta ao handler original.
+O injetor registra o estado nativo de animacao 4 que o jogo normalmente omite
+fora dos contextos de **Give Up**. Ele aceita somente o executavel, o atlas e o
+DLL conhecidos por SHA-256. Tambem valida as assinaturas nativas antes de
+escrever na memoria e opera em modo fechado diante de qualquer divergencia.
+As threads enumeradas do jogo ficam suspensas somente durante a escrita ou o
+rollback transacional dos patches.
 
-## Estado dos módulos
+## Estado dos modulos
 
-O shell do menu está funcional, mas nenhum módulo possui ABI nativa registrada.
-Por isso `mods/registry.json` está vazio e o menu informa esse estado, sem
-apresentar toggles fictícios. Um módulo só deve entrar no registro depois que
-sua rotina real de ativação, desativação e validação estiver implementada.
+Nenhum modulo possui ABI nativa registrada. Por isso `mods/registry.json` esta
+vazio e o menu informa esse estado, sem toggles ficticios. Um modulo so deve
+entrar no registro depois que sua rotina real de ativacao, desativacao e
+validacao estiver implementada.
 
 ## Arquivos
 
-- `INJETAR_MOD_MENU.py`: valida, injeta e monitora o callback nativo.
-- `INSTALAR_MOD_MENU.py`: instala o rótulo no FAD de forma transacional.
+- `INJETAR_MOD_MENU.py`: valida, injeta o DLL e monitora o estado nativo.
+- `INSTALAR_MOD_MENU.py`: valida o pacote e instala o rotulo no FAD de forma
+  transacional.
+- `mods/native/DisgaeaMayhemModMenu.dll`: renderer DirectX 12 in-process.
+- `native/mod_menu_overlay`: fonte, build reproduzivel e dependencias oficiais
+  fixadas do Dear ImGui 1.92.6 e MinHook 1.3.4.
 - `tools/fad_texture_tool.py`: parser/recompressor estrito NMPLTEX/YKCMP/LZ4.
-- `mods/main_menu/mods_slot.dds`: rótulo selecionado e não selecionado em BC7.
+- `mods/main_menu/mods_slot.dds`: rotulo selecionado e nao selecionado em BC7.
 
-O instalador cria `AnmDat_1_00_EN.fad.mod-menu-original` apenas como backup de
-rollback local. Esse arquivo é um artefato gerado e não deve ser versionado.
+O instalador cria `AnmDat_1_00_EN.fad.mod-menu-original` somente como backup de
+rollback local. Esse arquivo e um artefato gerado e nao deve ser versionado.
