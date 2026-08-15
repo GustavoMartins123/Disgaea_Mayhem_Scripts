@@ -301,10 +301,34 @@ bool SetMainMenuInputEnabled() {
     return true;
 }
 
+typedef DWORD(WINAPI* PFN_XInputGetState)(DWORD dwUserIndex, XINPUT_STATE* pState);
+static PFN_XInputGetState g_pfnXInputGetState = nullptr;
+static bool g_xinput_loaded = false;
+
+inline void EnsureXInputLoaded() {
+    if (g_xinput_loaded) return;
+    HMODULE h = LoadLibraryW(L"xinput1_4.dll");
+    if (!h) h = LoadLibraryW(L"xinput1_3.dll");
+    if (!h) h = LoadLibraryW(L"xinput9_1_0.dll");
+    if (h) {
+        g_pfnXInputGetState = reinterpret_cast<PFN_XInputGetState>(
+            reinterpret_cast<void*>(GetProcAddress(h, "XInputGetState")));
+    }
+    g_xinput_loaded = true;
+}
+
+DWORD SafeXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
+    EnsureXInputLoaded();
+    if (g_pfnXInputGetState) {
+        return g_pfnXInputGetState(dwUserIndex, pState);
+    }
+    return ERROR_DEVICE_NOT_CONNECTED;
+}
+
 bool ControllerBDown() {
     for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
         XINPUT_STATE state = {};
-        const DWORD result = XInputGetState(index, &state);
+        const DWORD result = SafeXInputGetState(index, &state);
         if (result == ERROR_SUCCESS && (state.Gamepad.wButtons & XINPUT_GAMEPAD_B) != 0) {
             return true;
         }
@@ -995,12 +1019,129 @@ void ScanAndDiscoverMods() {
     }
 }
 
-void UpdateGamepadIO() {
+struct GamepadNavState {
+    DWORD last_buttons = 0;
+    float repeat_timer = 0.0f;
+};
+static GamepadNavState g_gp_nav = {};
+
+void ProcessGamepadNavigation(float /*dt*/) {
+    if (!g_overlay_visible || g_discovered_mods.empty()) {
+        g_gp_nav.last_buttons = 0;
+        return;
+    }
+
+    WORD buttons = 0;
+    SHORT lx = 0, ly = 0;
+    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) {
+        XINPUT_STATE state = {};
+        if (SafeXInputGetState(i, &state) == ERROR_SUCCESS) {
+            buttons |= state.Gamepad.wButtons;
+            if (std::abs(state.Gamepad.sThumbLX) > std::abs(lx)) lx = state.Gamepad.sThumbLX;
+            if (std::abs(state.Gamepad.sThumbLY) > std::abs(ly)) ly = state.Gamepad.sThumbLY;
+        }
+    }
+
+    const bool up = (buttons & XINPUT_GAMEPAD_DPAD_UP) != 0 || ly > 18000;
+    const bool down = (buttons & XINPUT_GAMEPAD_DPAD_DOWN) != 0 || ly < -18000;
+    const bool left = (buttons & XINPUT_GAMEPAD_DPAD_LEFT) != 0 || lx < -18000;
+    const bool right = (buttons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 || lx > 18000;
+    const bool a_btn = (buttons & XINPUT_GAMEPAD_A) != 0;
+    const bool lb = (buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
+    const bool rb = (buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
+
+    const bool last_up = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_DPAD_UP) != 0;
+    const bool last_down = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_DPAD_DOWN) != 0;
+    const bool last_left = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_DPAD_LEFT) != 0;
+    const bool last_right = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0;
+    const bool last_a = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_A) != 0;
+    const bool last_lb = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
+    const bool last_rb = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
+
+    // Up / Previous mod
+    if ((up && !last_up) || (lb && !last_lb)) {
+        if (g_selected_mod > 0) {
+            g_selected_mod--;
+        } else {
+            g_selected_mod = static_cast<int>(g_discovered_mods.size()) - 1;
+        }
+    }
+    // Down / Next mod
+    if ((down && !last_down) || (rb && !last_rb)) {
+        if (g_selected_mod + 1 < static_cast<int>(g_discovered_mods.size())) {
+            g_selected_mod++;
+        } else {
+            g_selected_mod = 0;
+        }
+    }
+
+    if (g_selected_mod >= 0 && g_selected_mod < static_cast<int>(g_discovered_mods.size())) {
+        auto& mod = g_discovered_mods[g_selected_mod];
+
+        // Left / Right: Slider / Parameter control
+        if (!mod.options.empty()) {
+            for (auto& opt : mod.options) {
+                if (opt.type == OptionType::SliderInt) {
+                    if (left && !last_left) {
+                        opt.int_val = std::max(opt.min_int, opt.int_val - 5);
+                    }
+                    if (right && !last_right) {
+                        opt.int_val = std::min(opt.max_int, opt.int_val + 5);
+                    }
+                } else if (opt.type == OptionType::SliderFloat) {
+                    if (left && !last_left) {
+                        opt.float_val = std::max(opt.min_float, opt.float_val - 0.5f);
+                    }
+                    if (right && !last_right) {
+                        opt.float_val = std::min(opt.max_float, opt.float_val + 0.5f);
+                    }
+                } else if (opt.type == OptionType::Toggle) {
+                    if ((left && !last_left) || (right && !last_right)) {
+                        opt.bool_val = !opt.bool_val;
+                    }
+                }
+            }
+        }
+
+        // A Button: Toggle On/Off or Apply
+        if (a_btn && !last_a) {
+            if (mod.type == ModType::Toggle) {
+                mod.enabled = !mod.enabled;
+                if (mod.enabled) {
+                    std::snprintf(mod.status, sizeof(mod.status), "Mod ativado com sucesso.");
+                } else {
+                    std::snprintf(mod.status, sizeof(mod.status), "Mod desativado pelo usuario.");
+                }
+            } else if (mod.type == ModType::Action) {
+                if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
+                    uint32_t qty = 30;
+                    for (auto& opt : mod.options) {
+                        if (std::strcmp(opt.id, "ticket_amount") == 0) {
+                            qty = static_cast<uint32_t>(opt.int_val);
+                        }
+                    }
+                    TicketInjectResult res = InjectBoostTicketsNative(qty);
+                    mod.action_applied = true;
+                    std::snprintf(mod.status, sizeof(mod.status), "%s", res.message);
+                } else {
+                    mod.action_applied = true;
+                    std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
+                }
+            }
+        }
+    }
+
+    g_gp_nav.last_buttons = buttons;
+}
+
+void UpdateGamepadIO(float dt) {
     if (!g_overlay_visible) return;
+    ProcessGamepadNavigation(dt);
+
     ImGuiIO& io = ImGui::GetIO();
     for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) {
         XINPUT_STATE state = {};
-        if (XInputGetState(i, &state) == ERROR_SUCCESS) {
+        if (SafeXInputGetState(i, &state) == ERROR_SUCCESS) {
             WORD b = state.Gamepad.wButtons;
             io.AddKeyEvent(ImGuiKey_GamepadDpadUp, (b & XINPUT_GAMEPAD_DPAD_UP) != 0);
             io.AddKeyEvent(ImGuiKey_GamepadDpadDown, (b & XINPUT_GAMEPAD_DPAD_DOWN) != 0);
@@ -1239,10 +1380,22 @@ void BuildOverlay(const ImVec2& display_size) {
     }
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
+    ImGui::TextUnformatted("🎮 D-Pad/Stick:");
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Navegar |");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
+    ImGui::TextUnformatted("◄ / ►:");
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Sliders |");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
     ImGui::TextUnformatted("A / Enter / Clique:");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Alternar / Apply   |");
+    ImGui::TextUnformatted("Alternar/Apply |");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
     ImGui::TextUnformatted("B / Esc:");
@@ -1294,7 +1447,7 @@ bool RenderFrame() {
     }
     g_last_counter = now;
     io.MouseDrawCursor = g_overlay_visible;
-    UpdateGamepadIO();
+    UpdateGamepadIO(io.DeltaTime);
 
     ImGui_ImplDX12_NewFrame();
     ImGui::NewFrame();
