@@ -1019,9 +1019,16 @@ void ScanAndDiscoverMods() {
     }
 }
 
+enum class ActiveFocusPanel {
+    LeftList,
+    RightOptions
+};
+
 struct GamepadNavState {
     DWORD last_buttons = 0;
-    float repeat_timer = 0.0f;
+    ActiveFocusPanel active_panel = ActiveFocusPanel::LeftList;
+    int focused_option = 0; // 0 = main action/toggle, 1..N = mod options (1-indexed)
+    float right_stick_scroll = 0.0f;
 };
 static GamepadNavState g_gp_nav = {};
 
@@ -1033,14 +1040,19 @@ void ProcessGamepadNavigation(float /*dt*/) {
 
     WORD buttons = 0;
     SHORT lx = 0, ly = 0;
+    SHORT rx = 0, ry = 0;
     for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) {
         XINPUT_STATE state = {};
         if (SafeXInputGetState(i, &state) == ERROR_SUCCESS) {
             buttons |= state.Gamepad.wButtons;
             if (std::abs(state.Gamepad.sThumbLX) > std::abs(lx)) lx = state.Gamepad.sThumbLX;
             if (std::abs(state.Gamepad.sThumbLY) > std::abs(ly)) ly = state.Gamepad.sThumbLY;
+            if (std::abs(state.Gamepad.sThumbRX) > std::abs(rx)) rx = state.Gamepad.sThumbRX;
+            if (std::abs(state.Gamepad.sThumbRY) > std::abs(ry)) ry = state.Gamepad.sThumbRY;
         }
     }
+
+    g_gp_nav.right_stick_scroll = (std::abs(ry) > 6000) ? (static_cast<float>(ry) / 32768.0f) : 0.0f;
 
     const bool up = (buttons & XINPUT_GAMEPAD_DPAD_UP) != 0 || ly > 18000;
     const bool down = (buttons & XINPUT_GAMEPAD_DPAD_DOWN) != 0 || ly < -18000;
@@ -1058,74 +1070,121 @@ void ProcessGamepadNavigation(float /*dt*/) {
     const bool last_lb = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
     const bool last_rb = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
 
-    // Up / Previous mod
-    if ((up && !last_up) || (lb && !last_lb)) {
-        if (g_selected_mod > 0) {
-            g_selected_mod--;
+    // LB / RB: Toggle focus between Left List and Right Options
+    if ((lb && !last_lb) || (rb && !last_rb)) {
+        if (g_gp_nav.active_panel == ActiveFocusPanel::LeftList) {
+            g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+            g_gp_nav.focused_option = 0;
         } else {
-            g_selected_mod = static_cast<int>(g_discovered_mods.size()) - 1;
-        }
-    }
-    // Down / Next mod
-    if ((down && !last_down) || (rb && !last_rb)) {
-        if (g_selected_mod + 1 < static_cast<int>(g_discovered_mods.size())) {
-            g_selected_mod++;
-        } else {
-            g_selected_mod = 0;
+            g_gp_nav.active_panel = ActiveFocusPanel::LeftList;
         }
     }
 
-    if (g_selected_mod >= 0 && g_selected_mod < static_cast<int>(g_discovered_mods.size())) {
-        auto& mod = g_discovered_mods[g_selected_mod];
+    if (g_gp_nav.active_panel == ActiveFocusPanel::LeftList) {
+        // --- Left Panel Navigation (Mod List) ---
+        if (up && !last_up) {
+            if (g_selected_mod > 0) {
+                g_selected_mod--;
+            } else {
+                g_selected_mod = static_cast<int>(g_discovered_mods.size()) - 1;
+            }
+            g_gp_nav.focused_option = 0;
+        }
+        if (down && !last_down) {
+            if (g_selected_mod + 1 < static_cast<int>(g_discovered_mods.size())) {
+                g_selected_mod++;
+            } else {
+                g_selected_mod = 0;
+            }
+            g_gp_nav.focused_option = 0;
+        }
+        // Right or A button switches focus to options panel
+        if ((right && !last_right) || (a_btn && !last_a)) {
+            g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+            g_gp_nav.focused_option = 0;
+        }
+    } else {
+        // --- Right Panel Navigation (Options & Sliders) ---
+        if (g_selected_mod >= 0 && g_selected_mod < static_cast<int>(g_discovered_mods.size())) {
+            auto& mod = g_discovered_mods[g_selected_mod];
+            const int total_items = 1 + static_cast<int>(mod.options.size());
 
-        // Left / Right: Slider / Parameter control
-        if (!mod.options.empty()) {
-            for (auto& opt : mod.options) {
-                if (opt.type == OptionType::SliderInt) {
-                    if (left && !last_left) {
-                        opt.int_val = std::max(opt.min_int, opt.int_val - 5);
-                    }
-                    if (right && !last_right) {
-                        opt.int_val = std::min(opt.max_int, opt.int_val + 5);
-                    }
-                } else if (opt.type == OptionType::SliderFloat) {
-                    if (left && !last_left) {
-                        opt.float_val = std::max(opt.min_float, opt.float_val - 0.5f);
-                    }
-                    if (right && !last_right) {
-                        opt.float_val = std::min(opt.max_float, opt.float_val + 0.5f);
-                    }
-                } else if (opt.type == OptionType::Toggle) {
-                    if ((left && !last_left) || (right && !last_right)) {
-                        opt.bool_val = !opt.bool_val;
-                    }
+            // Move focus Up/Down between options
+            if (up && !last_up) {
+                if (g_gp_nav.focused_option > 0) {
+                    g_gp_nav.focused_option--;
+                } else {
+                    // At top item, go back to left list
+                    g_gp_nav.active_panel = ActiveFocusPanel::LeftList;
                 }
             }
-        }
-
-        // A Button: Toggle On/Off or Apply
-        if (a_btn && !last_a) {
-            if (mod.type == ModType::Toggle) {
-                mod.enabled = !mod.enabled;
-                if (mod.enabled) {
-                    std::snprintf(mod.status, sizeof(mod.status), "Mod ativado com sucesso.");
-                } else {
-                    std::snprintf(mod.status, sizeof(mod.status), "Mod desativado pelo usuario.");
+            if (down && !last_down) {
+                if (g_gp_nav.focused_option + 1 < total_items) {
+                    g_gp_nav.focused_option++;
                 }
-            } else if (mod.type == ModType::Action) {
-                if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
-                    uint32_t qty = 30;
-                    for (auto& opt : mod.options) {
-                        if (std::strcmp(opt.id, "ticket_amount") == 0) {
-                            qty = static_cast<uint32_t>(opt.int_val);
+            }
+
+            // Left when on main item returns focus to left panel
+            if (g_gp_nav.focused_option == 0 && left && !last_left) {
+                g_gp_nav.active_panel = ActiveFocusPanel::LeftList;
+            }
+
+            // Interact with focused item
+            if (g_gp_nav.focused_option == 0) {
+                // Focus is on Main Control (Toggle or Action)
+                if (a_btn && !last_a) {
+                    if (mod.type == ModType::Toggle) {
+                        mod.enabled = !mod.enabled;
+                        std::snprintf(mod.status, sizeof(mod.status),
+                            mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
+                    } else if (mod.type == ModType::Action) {
+                        if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
+                            uint32_t qty = 30;
+                            for (auto& opt : mod.options) {
+                                if (std::strcmp(opt.id, "ticket_amount") == 0) {
+                                    qty = static_cast<uint32_t>(opt.int_val);
+                                }
+                            }
+                            TicketInjectResult res = InjectBoostTicketsNative(qty);
+                            mod.action_applied = true;
+                            std::snprintf(mod.status, sizeof(mod.status), "%s", res.message);
+                        } else {
+                            mod.action_applied = true;
+                            std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
                         }
                     }
-                    TicketInjectResult res = InjectBoostTicketsNative(qty);
-                    mod.action_applied = true;
-                    std::snprintf(mod.status, sizeof(mod.status), "%s", res.message);
-                } else {
-                    mod.action_applied = true;
-                    std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
+                }
+            } else {
+                // Focus is on sub-option (1..N)
+                const size_t opt_idx = static_cast<size_t>(g_gp_nav.focused_option - 1);
+                if (opt_idx < mod.options.size()) {
+                    auto& opt = mod.options[opt_idx];
+                    const int step_int = (opt.max_int - opt.min_int > 50) ? 5 : 1;
+
+                    if (opt.type == OptionType::SliderInt) {
+                        if (left && !last_left) {
+                            opt.int_val = std::max(opt.min_int, opt.int_val - step_int);
+                        }
+                        if (right && !last_right) {
+                            opt.int_val = std::min(opt.max_int, opt.int_val + step_int);
+                        }
+                        if (a_btn && !last_a) {
+                            // Cycle slider value on A press
+                            opt.int_val += step_int;
+                            if (opt.int_val > opt.max_int) opt.int_val = opt.min_int;
+                        }
+                    } else if (opt.type == OptionType::SliderFloat) {
+                        if (left && !last_left) {
+                            opt.float_val = std::max(opt.min_float, opt.float_val - 0.5f);
+                        }
+                        if (right && !last_right) {
+                            opt.float_val = std::min(opt.max_float, opt.float_val + 0.5f);
+                        }
+                    } else if (opt.type == OptionType::Toggle) {
+                        if ((left && !last_left) || (right && !last_right) || (a_btn && !last_a)) {
+                            opt.bool_val = !opt.bool_val;
+                        }
+                    }
                 }
             }
         }
@@ -1147,8 +1206,8 @@ void UpdateGamepadIO(float dt) {
             io.AddKeyEvent(ImGuiKey_GamepadDpadDown, (b & XINPUT_GAMEPAD_DPAD_DOWN) != 0);
             io.AddKeyEvent(ImGuiKey_GamepadDpadLeft, (b & XINPUT_GAMEPAD_DPAD_LEFT) != 0);
             io.AddKeyEvent(ImGuiKey_GamepadDpadRight, (b & XINPUT_GAMEPAD_DPAD_RIGHT) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadFaceDown, (b & XINPUT_GAMEPAD_A) != 0); // A button
-            io.AddKeyEvent(ImGuiKey_GamepadFaceRight, (b & XINPUT_GAMEPAD_B) != 0); // B button
+            io.AddKeyEvent(ImGuiKey_GamepadFaceDown, (b & XINPUT_GAMEPAD_A) != 0);
+            io.AddKeyEvent(ImGuiKey_GamepadFaceRight, (b & XINPUT_GAMEPAD_B) != 0);
             io.AddKeyEvent(ImGuiKey_GamepadFaceLeft, (b & XINPUT_GAMEPAD_X) != 0);
             io.AddKeyEvent(ImGuiKey_GamepadFaceUp, (b & XINPUT_GAMEPAD_Y) != 0);
 
@@ -1199,10 +1258,19 @@ void BuildOverlay(const ImVec2& display_size) {
     // Two-column layout: Left = Mod Selector, Right = Mod Details & Dynamic Controls
     const float left_width = 300.0f;
     const float content_height = height - 120.0f;
+    const bool is_left_focused = (g_gp_nav.active_panel == ActiveFocusPanel::LeftList);
 
     // --- Left Panel: Dynamic Mod List ---
+    if (is_left_focused) {
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.74f, 0.20f, 0.95f));
+    }
     ImGui::BeginChild("##ModListPanel", ImVec2(left_width, content_height), true);
-    ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "MODS DESCOBERTOS (%d):", static_cast<int>(g_discovered_mods.size()));
+    if (is_left_focused) {
+        ImGui::PopStyleColor();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "MODS DESCOBERTOS (%d) [FOCO: LISTA]", static_cast<int>(g_discovered_mods.size()));
+    } else {
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "MODS DESCOBERTOS (%d)", static_cast<int>(g_discovered_mods.size()));
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("🔄")) {
         ScanAndDiscoverMods();
@@ -1217,17 +1285,29 @@ void BuildOverlay(const ImVec2& display_size) {
         
         char label[128];
         if (mod.type == ModType::Action) {
-            std::snprintf(label, sizeof(label), "%s %s",
+            std::snprintf(label, sizeof(label), "%s%s %s",
+                (is_selected && is_left_focused) ? "> " : "  ",
                 mod.action_applied ? "[OK]" : "[*]",
                 mod.name);
         } else {
-            std::snprintf(label, sizeof(label), "%s %s",
+            std::snprintf(label, sizeof(label), "%s%s %s",
+                (is_selected && is_left_focused) ? "> " : "  ",
                 mod.enabled ? "[ON]" : "[OFF]",
                 mod.name);
         }
 
+        if (is_selected && is_left_focused) {
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.35f, 0.25f, 0.12f, 0.95f));
+        }
+
         if (ImGui::Selectable(label, is_selected, 0, ImVec2(0, 32.0f))) {
             g_selected_mod = static_cast<int>(i);
+            g_gp_nav.active_panel = ActiveFocusPanel::LeftList;
+        }
+
+        if (is_selected && is_left_focused) {
+            ImGui::PopStyleColor();
+            ImGui::SetItemDefaultFocus();
         }
 
         ImGui::PopID();
@@ -1237,7 +1317,21 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::SameLine();
 
     // --- Right Panel: Selected Mod Dynamic UI & Options ---
-    ImGui::BeginChild("##ModDetailsPanel", ImVec2(0.0f, content_height), true);
+    const bool is_right_focused = (g_gp_nav.active_panel == ActiveFocusPanel::RightOptions);
+    if (is_right_focused) {
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.74f, 0.20f, 0.95f));
+    }
+    ImGui::BeginChild("##ModDetailsPanel", ImVec2(0.0f, content_height), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    if (is_right_focused) {
+        ImGui::PopStyleColor();
+    }
+
+    // Right stick smooth scrolling
+    if (std::abs(g_gp_nav.right_stick_scroll) > 0.05f) {
+        float cur_scroll = ImGui::GetScrollY();
+        ImGui::SetScrollY(cur_scroll - g_gp_nav.right_stick_scroll * 10.0f);
+    }
+
     if (g_selected_mod >= 0 && g_selected_mod < static_cast<int>(g_discovered_mods.size())) {
         auto& mod = g_discovered_mods[g_selected_mod];
 
@@ -1249,6 +1343,10 @@ void BuildOverlay(const ImVec2& display_size) {
 
         ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Categoria: %s", mod.category);
         ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.65f, 1.0f), "Versao: %s  |  Autor: %s", mod.version, mod.author);
+        if (is_right_focused) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), " [FOCO: OPCOES - LB/RB para Lista]");
+        }
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
@@ -1269,43 +1367,60 @@ void BuildOverlay(const ImVec2& display_size) {
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
-        // --- Main Mod Control: Toggle (On/Off) or Action (Apply) ---
+        // --- Main Mod Control (Option Index 0) ---
+        const bool is_opt0_focused = (is_right_focused && g_gp_nav.focused_option == 0);
+        if (is_opt0_focused) {
+            ImGui::SetScrollHereY(0.2f);
+        }
+
         if (mod.type == ModType::Toggle) {
-            ImGui::TextUnformatted("Controle Principal:");
+            if (is_opt0_focused) {
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> Controle Principal:");
+            } else {
+                ImGui::TextUnformatted("  Controle Principal:");
+            }
             ImGui::SameLine();
             
             if (mod.enabled) {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.65f, 0.25f, 0.95f));
+                ImGui::PushStyleColor(ImGuiCol_Button, is_opt0_focused ? ImVec4(0.25f, 0.85f, 0.35f, 1.0f) : ImVec4(0.15f, 0.65f, 0.25f, 0.95f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.75f, 0.3f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.85f, 0.35f, 1.0f));
-                if (ImGui::Button("  [ ATIVADO (ON) ]  ", ImVec2(160, 34))) {
+                if (ImGui::Button(is_opt0_focused ? " > [ ATIVADO (ON) ] < " : "  [ ATIVADO (ON) ]  ", ImVec2(180, 34))) {
                     mod.enabled = false;
                     std::snprintf(mod.status, sizeof(mod.status), "Mod desativado pelo usuario.");
+                    g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+                    g_gp_nav.focused_option = 0;
                 }
                 ImGui::PopStyleColor(3);
             } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.35f, 0.35f, 0.95f));
+                ImGui::PushStyleColor(ImGuiCol_Button, is_opt0_focused ? ImVec4(0.55f, 0.55f, 0.55f, 1.0f) : ImVec4(0.35f, 0.35f, 0.35f, 0.95f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
-                if (ImGui::Button("  [ DESATIVADO (OFF) ]  ", ImVec2(160, 34))) {
+                if (ImGui::Button(is_opt0_focused ? " > [ DESATIVADO (OFF) ] < " : "  [ DESATIVADO (OFF) ]  ", ImVec2(180, 34))) {
                     mod.enabled = true;
                     std::snprintf(mod.status, sizeof(mod.status), "Mod ativado com sucesso.");
+                    g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+                    g_gp_nav.focused_option = 0;
                 }
                 ImGui::PopStyleColor(3);
             }
         } else if (mod.type == ModType::Action) {
-            ImGui::TextUnformatted("Acao do Mod:");
+            if (is_opt0_focused) {
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> Acao do Mod:");
+            } else {
+                ImGui::TextUnformatted("  Acao do Mod:");
+            }
             ImGui::SameLine();
 
             char btn_lbl[64];
-            std::snprintf(btn_lbl, sizeof(btn_lbl), "  [ %s ]  ",
+            std::snprintf(btn_lbl, sizeof(btn_lbl), is_opt0_focused ? " > [ %s ] < " : "  [ %s ]  ",
                 mod.action_applied ? "Re-Apply Mod" : (mod.action_label[0] ? mod.action_label : "Apply"));
 
             ImGui::PushStyleColor(ImGuiCol_Button, mod.action_applied ? ImVec4(0.18f, 0.45f, 0.25f, 0.95f) : ImVec4(0.72f, 0.25f, 0.15f, 0.95f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.35f, 0.2f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.95f, 0.45f, 0.25f, 1.0f));
 
-            if (ImGui::Button(btn_lbl, ImVec2(160, 34))) {
+            if (ImGui::Button(btn_lbl, ImVec2(180, 34))) {
                 if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
                     uint32_t qty = 30;
                     for (auto& opt : mod.options) {
@@ -1320,11 +1435,13 @@ void BuildOverlay(const ImVec2& display_size) {
                     mod.action_applied = true;
                     std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
                 }
+                g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+                g_gp_nav.focused_option = 0;
             }
             ImGui::PopStyleColor(3);
         }
 
-        // --- Dynamic Sub-Options / Sliders constructed from mod.json ---
+        // --- Dynamic Sub-Options / Sliders (Option Indices 1..N) ---
         if (!mod.options.empty()) {
             ImGui::Dummy(ImVec2(0.0f, 6.0f));
             ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "⚙️ Opcoes & Parametros:");
@@ -1332,21 +1449,53 @@ void BuildOverlay(const ImVec2& display_size) {
 
             for (size_t j = 0; j < mod.options.size(); ++j) {
                 auto& opt = mod.options[j];
+                const bool is_cur_opt_focused = (is_right_focused && g_gp_nav.focused_option == static_cast<int>(j + 1));
+                
                 ImGui::PushID(static_cast<int>(j));
 
+                if (is_cur_opt_focused) {
+                    ImGui::SetScrollHereY(0.45f);
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.35f, 0.25f, 0.12f, 0.95f));
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
+                }
+
                 if (opt.type == OptionType::Toggle) {
-                    ImGui::Checkbox(opt.name, &opt.bool_val);
+                    char chk_lbl[128];
+                    std::snprintf(chk_lbl, sizeof(chk_lbl), "%s%s", is_cur_opt_focused ? "> " : "  ", opt.name);
+                    if (ImGui::Checkbox(chk_lbl, &opt.bool_val)) {
+                        g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+                        g_gp_nav.focused_option = static_cast<int>(j + 1);
+                    }
                 } else if (opt.type == OptionType::SliderInt) {
-                    ImGui::TextUnformatted(opt.name);
+                    if (is_cur_opt_focused) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ ◄ / ► para Ajustar ]", opt.name);
+                    } else {
+                        ImGui::TextUnformatted(opt.name);
+                    }
                     ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
-                    ImGui::SliderInt("##slider", &opt.int_val, opt.min_int, opt.max_int);
+                    if (ImGui::SliderInt("##slider", &opt.int_val, opt.min_int, opt.max_int)) {
+                        g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+                        g_gp_nav.focused_option = static_cast<int>(j + 1);
+                    }
                     ImGui::PopItemWidth();
                 } else if (opt.type == OptionType::SliderFloat) {
-                    ImGui::TextUnformatted(opt.name);
+                    if (is_cur_opt_focused) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ ◄ / ► para Ajustar ]", opt.name);
+                    } else {
+                        ImGui::TextUnformatted(opt.name);
+                    }
                     ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
-                    ImGui::SliderFloat("##slider", &opt.float_val, opt.min_float, opt.max_float, "%.1f");
+                    if (ImGui::SliderFloat("##slider", &opt.float_val, opt.min_float, opt.max_float, "%.1f")) {
+                        g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
+                        g_gp_nav.focused_option = static_cast<int>(j + 1);
+                    }
                     ImGui::PopItemWidth();
                 }
+
+                if (is_cur_opt_focused) {
+                    ImGui::PopStyleColor(2);
+                }
+
                 ImGui::PopID();
             }
         }
@@ -1380,7 +1529,13 @@ void BuildOverlay(const ImVec2& display_size) {
     }
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("🎮 D-Pad/Stick:");
+    ImGui::TextUnformatted("🎮 LB / RB:");
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextUnformatted("Trocar Painel |");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
+    ImGui::TextUnformatted("D-Pad/Stick:");
     ImGui::PopStyleColor();
     ImGui::SameLine();
     ImGui::TextUnformatted("Navegar |");
@@ -1392,10 +1547,10 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::TextUnformatted("Sliders |");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("A / Enter / Clique:");
+    ImGui::TextUnformatted("A:");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Alternar/Apply |");
+    ImGui::TextUnformatted("Confirmar |");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
     ImGui::TextUnformatted("B / Esc:");
