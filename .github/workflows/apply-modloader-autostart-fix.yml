@@ -27,6 +27,13 @@ jobs:
           New-Item -ItemType Directory -Force $patchDir | Out-Null
           Copy-Item '.github\patches\*.patch' $patchDir
 
+          Get-ChildItem $patchDir -Filter '*.patch' | ForEach-Object {
+            $text = [System.IO.File]::ReadAllText($_.FullName)
+            if (-not $text.EndsWith("`n")) {
+              [System.IO.File]::AppendAllText($_.FullName, "`n", [System.Text.UTF8Encoding]::new($false))
+            }
+          }
+
           git fetch origin main
           git checkout -B modloader-publish origin/main
 
