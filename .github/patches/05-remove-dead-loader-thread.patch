@@ -1,0 +1,16 @@
+diff --git a/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work2/native/mod_menu_overlay/mod_menu_overlay.cpp
+index 7fc9756..9cbf2ee 100644
+--- a/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work2/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -2169,10 +2169,6 @@ void CleanupHooks() {
+ }
+ 
+ 
+-
+-DWORD WINAPI ModLoaderStartupThread(LPVOID) {
+-    ScanAndDiscoverMods();
+-    return 0;
+-}
+ 
+ DWORD WINAPI AutoInitThread(LPVOID) {
+     HMODULE game_exe = GetModuleHandleW(nullptr);
