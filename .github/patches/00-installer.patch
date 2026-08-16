@@ -1,0 +1,164 @@
+diff --git a/disgaea_extract/INSTALAR_MOD.cpp b/disgaea_work/INSTALAR_MOD.cpp
+index a3b82ac..a5f281a 100644
+--- a/disgaea_extract/INSTALAR_MOD.cpp
++++ b/disgaea_work/INSTALAR_MOD.cpp
+@@ -16,6 +16,86 @@ bool dir_exists(const char* path) {
+     return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
+ }
+ 
++
++std::string join_path(const std::string& base, const std::string& child) {
++    if (base.empty()) return child;
++    if (base.back() == '\\' || base.back() == '/') return base + child;
++    return base + "\\" + child;
++}
++
++bool ensure_directory(const std::string& path) {
++    if (path.empty() || dir_exists(path.c_str())) return true;
++
++    size_t slash = path.find_last_of("\\/");
++    if (slash != std::string::npos) {
++        std::string parent = path.substr(0, slash);
++        if (!parent.empty() && parent.back() != ':') {
++            ensure_directory(parent);
++        }
++    }
++
++    if (CreateDirectoryA(path.c_str(), NULL)) return true;
++    return GetLastError() == ERROR_ALREADY_EXISTS && dir_exists(path.c_str());
++}
++
++bool copy_file_replace(const std::string& source, const std::string& target, const char* label) {
++    size_t slash = target.find_last_of("\\/");
++    if (slash != std::string::npos) {
++        ensure_directory(target.substr(0, slash));
++    }
++    if (!CopyFileA(source.c_str(), target.c_str(), FALSE)) {
++        printf("[ERRO] Falha ao copiar %s: %s -> %s (Win32=%lu)\\n",
++               label, source.c_str(), target.c_str(), GetLastError());
++        return false;
++    }
++    return true;
++}
++
++bool copy_directory_recursive(const std::string& source, const std::string& target, bool preserve_enabled_txt) {
++    if (!dir_exists(source.c_str())) {
++        printf("[AVISO] Pasta de origem ausente: %s\\n", source.c_str());
++        return false;
++    }
++    if (!ensure_directory(target)) {
++        printf("[ERRO] Nao foi possivel criar pasta: %s (Win32=%lu)\\n", target.c_str(), GetLastError());
++        return false;
++    }
++
++    WIN32_FIND_DATAA fd = {};
++    std::string pattern = join_path(source, "*");
++    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
++    if (hFind == INVALID_HANDLE_VALUE) return false;
++
++    bool ok = true;
++    do {
++        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
++        std::string src = join_path(source, fd.cFileName);
++        std::string dst = join_path(target, fd.cFileName);
++
++        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
++            if (!copy_directory_recursive(src, dst, preserve_enabled_txt)) ok = false;
++            continue;
++        }
++
++        if (preserve_enabled_txt && _stricmp(fd.cFileName, "enabled.txt") == 0 && file_exists(dst.c_str())) {
++            continue;
++        }
++        if (!copy_file_replace(src, dst, fd.cFileName)) ok = false;
++    } while (FindNextFileA(hFind, &fd));
++
++    FindClose(hFind);
++    return ok;
++}
++
++bool GetInstallerDir(char* out_dir, size_t max_len) {
++    DWORD len = GetModuleFileNameA(NULL, out_dir, (DWORD)max_len);
++    if (len == 0 || len >= max_len) return false;
++    char* slash = strrchr(out_dir, '\\');
++    if (!slash) return false;
++    *slash = '\0';
++    return true;
++}
++
+ // -----------------------------------------------------------------------------
+ // Auto-Discovery: Dynamically discovers the game installation directory
+ // -----------------------------------------------------------------------------
+@@ -88,6 +168,13 @@ bool AutoDiscoverGameDir(char* out_dir, size_t max_len) {
+ int main() {
+     SetConsoleOutputCP(CP_UTF8);
+ 
++    char installer_dir[MAX_PATH] = {};
++    if (!GetInstallerDir(installer_dir, sizeof(installer_dir))) {
++        printf("[ERRO] Nao foi possivel resolver a pasta do instalador.\n");
++        return 1;
++    }
++    SetCurrentDirectoryA(installer_dir);
++
+     printf("======================================================================\n");
+     printf("  DISGAEA MAYHEM - INSTALADOR AUTOMATICO DE MODS (AUTO-DISCOVERY)\n");
+     printf("======================================================================\n");
+@@ -103,7 +190,8 @@ int main() {
+     printf("[OK] Pasta do jogo auto-descoberta: %s\n", game_dir);
+ 
+     // 1. SmokeAPI DLL
+-    char smoke_src[MAX_PATH] = "SmokeAPI\\smoke_api64.dll";
++    char smoke_src[MAX_PATH] = {};
++    snprintf(smoke_src, sizeof(smoke_src), "%s\\SmokeAPI\\smoke_api64.dll", installer_dir);
+     char target_dll[MAX_PATH] = {};
+     char backup_dll[MAX_PATH] = {};
+     snprintf(target_dll, sizeof(target_dll), "%s\\steam_api64.dll", game_dir);
+@@ -120,7 +208,8 @@ int main() {
+     }
+ 
+     // 2. Mod Menu & Proxy DLL
+-    char menu_dll_src[MAX_PATH] = "native\\mod_menu_overlay\\build\\DisgaeaMayhemModMenu.dll";
++    char menu_dll_src[MAX_PATH] = {};
++    snprintf(menu_dll_src, sizeof(menu_dll_src), "%s\\native\\mod_menu_overlay\\build\\DisgaeaMayhemModMenu.dll", installer_dir);
+     char proxy_target[MAX_PATH] = {};
+     char native_target_dir[MAX_PATH] = {};
+     char native_target_dll[MAX_PATH] = {};
+@@ -137,10 +226,36 @@ int main() {
+         printf("[OK] Mod Menu Overlay instalado como dxgi.dll e em mods/native/.\n");
+     }
+ 
+-    // 3. Copiar mods
++    // 3. Copiar todos os mods do repositorio para o jogo.
++    // enabled.txt existente e preservado para nao apagar a escolha do usuario.
+     char mods_target[MAX_PATH] = {};
+     snprintf(mods_target, sizeof(mods_target), "%s\\mods", game_dir);
+-    CreateDirectoryA(mods_target, NULL);
++    std::string mods_source = join_path(installer_dir, "mods");
++    if (copy_directory_recursive(mods_source, mods_target, true)) {
++        printf("[OK] Mods sincronizados com a pasta do jogo.\n");
++    }
++
++    // Reaplica o binario do host depois da copia recursiva, garantindo que a
++    // versao compilada mais recente vença qualquer copia antiga de mods/native.
++    if (file_exists(menu_dll_src)) {
++        copy_file_replace(menu_dll_src, proxy_target, "dxgi.dll");
++        copy_file_replace(menu_dll_src, native_target_dll, "DisgaeaMayhemModMenu.dll");
++    }
++
++    // 4. SmokeAPI.config.json
++    std::string smoke_config_source = join_path(installer_dir, "SmokeAPI.config.json");
++    std::string smoke_config_target = join_path(game_dir, "SmokeAPI.config.json");
++    if (file_exists(smoke_config_source.c_str()) &&
++        copy_file_replace(smoke_config_source, smoke_config_target, "SmokeAPI.config.json")) {
++        printf("[OK] SmokeAPI.config.json sincronizado.\n");
++    }
++
++    // 5. Tabelas modificadas: DLC, Cheat Shop e Dark Assembly.
++    std::string database_source = join_path(installer_dir, "database_mods");
++    std::string database_target = join_path(game_dir, "data\\database");
++    if (copy_directory_recursive(database_source, database_target, false)) {
++        printf("[OK] Tabelas database_mods aplicadas em data\\database.\n");
++    }
+ 
+     printf("======================================================================\n");
+     printf("[SUCESSO] Modding framework instalado com sucesso via auto-discovery!\n");
