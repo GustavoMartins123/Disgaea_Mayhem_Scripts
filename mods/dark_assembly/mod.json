@@ -2,19 +2,12 @@
   "id": "dark_assembly_approval",
   "name": "Dark Assembly - Aprovação 100% dos Senadores",
   "category": "Qualidade de Vida (QoL)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Aprova instantaneamente todas as propostas, desejos e leis na Assembleia Sombria com 100% de votos favoráveis dos senadores, sem necessidade de suborno com itens ou combate.",
-  "type": "toggle",
-  "enabled": true,
-  "components": "Tabela de desejos (wish.dat) + Override nativo de senadores",
-  "options": [
-    {
-      "id": "instant_pass",
-      "name": "Aprovação Imediata sem Animação de Voto",
-      "type": "toggle",
-      "default": true,
-      "value": true
-    }
-  ]
+  "description": "Aplica a tabela modificada da Dark Assembly para propostas, desejos e leis com aprovação garantida.",
+  "type": "action",
+  "auto_apply": true,
+  "action_label": "Re-Apply",
+  "executable": "APLICAR_MOD_DARK_ASSEMBLY.exe",
+  "components": "wish.dat + aplicador nativo auto-contido"
 }

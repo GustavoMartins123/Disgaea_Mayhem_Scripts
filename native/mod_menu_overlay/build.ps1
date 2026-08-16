@@ -8,9 +8,20 @@ $output = Join-Path $outputDirectory 'DisgaeaMayhemModMenu.dll'
 $gcc = 'C:\TDM-GCC-64\bin\gcc.exe'
 $gxx = 'C:\TDM-GCC-64\bin\g++.exe'
 
+# Prefer the project's TDM-GCC toolchain, but allow a MinGW toolchain from PATH
+# so the same build is reproducible on CI and other Windows machines.
+if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
+    $gccCommand = Get-Command gcc.exe -ErrorAction SilentlyContinue
+    if ($gccCommand) { $gcc = $gccCommand.Source }
+}
+if (-not (Test-Path -LiteralPath $gxx -PathType Leaf)) {
+    $gxxCommand = Get-Command g++.exe -ErrorAction SilentlyContinue
+    if ($gxxCommand) { $gxx = $gxxCommand.Source }
+}
+
 foreach ($compiler in @($gcc, $gxx)) {
     if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-        throw "Compilador obrigatorio ausente: $compiler"
+        throw "Compilador MinGW obrigatorio ausente: $compiler"
     }
 }
 

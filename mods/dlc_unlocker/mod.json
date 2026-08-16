@@ -6,6 +6,7 @@
   "author": "Disgaea Mayhem Mod Team",
   "description": "Emula ISteamApps e ISteamInventory via SmokeAPI, converte consumíveis para resgate offline infinito no NPC Carlbunch e sincroniza 30x Boost Tickets com multiplicador de +900% na sessão ativa.",
   "type": "action",
+  "auto_apply": true,
   "action_label": "Apply",
   "executable": "APLICAR_MOD_DLC.exe",
   "components": [
