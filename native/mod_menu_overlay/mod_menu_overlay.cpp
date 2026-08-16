@@ -1064,6 +1064,20 @@ void ParseModJson(const std::string& filepath, ModItem& mod) {
     } else {
         mod.type = ModType::Toggle;
         mod.enabled = JsonExtractBool(json, "enabled", true);
+
+        // Check enabled.txt in mod folder
+        size_t last_sep = filepath.find_last_of("\\/");
+        if (last_sep != std::string::npos) {
+            std::string enabled_txt_path = filepath.substr(0, last_sep) + "\\enabled.txt";
+            FILE* f_en = fopen(enabled_txt_path.c_str(), "r");
+            if (f_en) {
+                char ch = 0;
+                if (fread(&ch, 1, 1, f_en) == 1) {
+                    mod.enabled = (ch == '1');
+                }
+                fclose(f_en);
+            }
+        }
     }
 
     // Parse options array
@@ -2009,6 +2023,9 @@ DWORD WINAPI AutoInitThread(LPVOID) {
     if (CreateHooks()) {
         SetStatus(STATUS_HOOKS_INSTALLED);
     }
+
+    // Auto-discover and initialize all active mods on game boot!
+    ScanAndDiscoverMods();
 
     return 0;
 }
