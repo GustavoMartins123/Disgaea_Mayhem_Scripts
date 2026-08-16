@@ -10,12 +10,43 @@
 static volatile bool g_mod_enabled = false;
 static uintptr_t g_exe_base = 0;
 
-// Original opcodes for clean restoration on Mod_Disable()
-static uint8_t g_orig_dec[6] = { 0xFF, 0x8B, 0x78, 0x01, 0x00, 0x00 };
-static uint8_t g_orig_mov1[6] = { 0x89, 0x86, 0x78, 0x01, 0x00, 0x00 };
-static uint8_t g_orig_mov2[6] = { 0x89, 0x85, 0x78, 0x01, 0x00, 0x00 };
+struct PatchEntry {
+    uint32_t rva;
+    uint8_t patch[6];
+    uint8_t orig[6];
+    size_t size;
+};
 
-static const uint8_t g_nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+// -----------------------------------------------------------------------------
+// Exact Native Code Patches (Replacing Energy Reads with Constant 100)
+// -----------------------------------------------------------------------------
+static PatchEntry g_patches[] = {
+    // 1. RVA 0x453075: mov ecx, [rbx + 0x178] (8B 8B 78 01 00 00) -> mov ecx, 100; nop (B9 64 00 00 00 90)
+    { 0x00453075, { 0xB9, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x8B, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 2. RVA 0x46E1F4: mov edx, [rdx + 0x178] (8B 92 78 01 00 00) -> mov edx, 100; nop (BA 64 00 00 00 90)
+    { 0x0046E1F4, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x92, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 3. RVA 0x4A342E: mov edx, [rdi + 0x178] (8B 97 78 01 00 00) -> mov edx, 100; nop (BA 64 00 00 00 90)
+    { 0x004A342E, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x97, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 4. RVA 0x4944B3: mov eax, [rcx + 0x178] (8B 81 78 01 00 00) -> mov eax, 100; nop (B8 64 00 00 00 90)
+    { 0x004944B3, { 0xB8, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x81, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 5. RVA 0x4979A6: mov eax, [rcx + 0x178] (8B 81 78 01 00 00) -> mov eax, 100; nop (B8 64 00 00 00 90)
+    { 0x004979A6, { 0xB8, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x81, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 6. RVA 0x4B1D12: mov edi, [rdi + 0x178] (8B BF 78 01 00 00) -> mov edi, 100; nop (BF 64 00 00 00 90)
+    { 0x004B1D12, { 0xBF, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0xBF, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 7. RVA 0x4B1DA4: mov ecx, [rdi + 0x178] (8B 8F 78 01 00 00) -> mov ecx, 100; nop (B9 64 00 00 00 90)
+    { 0x004B1DA4, { 0xB9, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x8F, 0x78, 0x01, 0x00, 0x00 }, 6 },
+
+    // 8. RVA 0x4B8564: mov edx, [rax + 0x178] (8B 90 78 01 00 00) -> mov edx, 100; nop (BA 64 00 00 00 90)
+    { 0x004B8564, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x90, 0x78, 0x01, 0x00, 0x00 }, 6 }
+};
+
+static const size_t g_num_patches = sizeof(g_patches) / sizeof(g_patches[0]);
 
 // -----------------------------------------------------------------------------
 // Direct Memory Byte Patch Helper
@@ -70,26 +101,19 @@ static void ApplyNativeCodePatches() {
         if (!g_exe_base) g_exe_base = 0x140000000;
     }
 
-    // 1. Patch DEC dword ptr [rbx + 0x178] at RVA 0x003C4ABF -> NOP (Disables energy decrement on step)
-    uintptr_t rva_dec = g_exe_base + 0x3C4ABF;
-    PatchCodeBytes(rva_dec, g_nop6, 6, g_orig_dec);
-
-    // 2. Patch MOV [rsi + 0x178], eax at RVA 0x004AD281 -> NOP (Prevents overriding energy with depleted value)
-    uintptr_t rva_mov1 = g_exe_base + 0x4AD281;
-    PatchCodeBytes(rva_mov1, g_nop6, 6, g_orig_mov1);
-
-    // 3. Patch MOV [rbp + 0x178], eax at RVA 0x004BA6EE -> NOP (Prevents turn end energy decrement)
-    uintptr_t rva_mov2 = g_exe_base + 0x4BA6EE;
-    PatchCodeBytes(rva_mov2, g_nop6, 6, g_orig_mov2);
+    for (size_t i = 0; i < g_num_patches; ++i) {
+        uintptr_t addr = g_exe_base + g_patches[i].rva;
+        PatchCodeBytes(addr, g_patches[i].patch, g_patches[i].size, g_patches[i].orig);
+    }
 }
 
 static void RestoreNativeCodePatches() {
     if (!g_exe_base) return;
 
-    // Restore original CPU opcodes
-    PatchCodeBytes(g_exe_base + 0x3C4ABF, g_orig_dec, 6);
-    PatchCodeBytes(g_exe_base + 0x4AD281, g_orig_mov1, 6);
-    PatchCodeBytes(g_exe_base + 0x4BA6EE, g_orig_mov2, 6);
+    for (size_t i = 0; i < g_num_patches; ++i) {
+        uintptr_t addr = g_exe_base + g_patches[i].rva;
+        PatchCodeBytes(addr, g_patches[i].orig, g_patches[i].size);
+    }
 }
 
 // -----------------------------------------------------------------------------

@@ -5,6 +5,25 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+struct PatchEntry {
+    uint32_t rva;
+    uint8_t patch[6];
+    const char* desc;
+};
+
+static PatchEntry g_patches[] = {
+    { 0x00453075, { 0xB9, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Calculo de Passos (mov ecx, 100)" },
+    { 0x0046E1F4, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Logica de Turno (mov edx, 100)" },
+    { 0x004A342E, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Verificacao de Acoes (mov edx, 100)" },
+    { 0x004944B3, { 0xB8, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Check Energia Restante 1 (mov eax, 100)" },
+    { 0x004979A6, { 0xB8, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Check Energia Restante 2 (mov eax, 100)" },
+    { 0x004B1D12, { 0xBF, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Display Visual HUD (mov edi, 100)" },
+    { 0x004B1DA4, { 0xB9, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Renderizador de HUD (mov ecx, 100)" },
+    { 0x004B8564, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, "Acao de Tabuleiro (mov edx, 100)" }
+};
+
+static const size_t g_num_patches = sizeof(g_patches) / sizeof(g_patches[0]);
+
 DWORD GetGamePID() {
     DWORD pid = 0;
     PROCESSENTRY32W pe = { sizeof(pe) };
@@ -52,8 +71,8 @@ int main(int argc, char* argv[]) {
 
     DWORD pid = GetGamePID();
     if (!pid) {
-        printf("[ERRO] Disgaea_Mayhem.exe não está em execução!\n");
-        printf("Inicie o jogo antes de executar este utilitário.\n");
+        printf("[ERRO] Disgaea_Mayhem.exe nao esta em execucao!\n");
+        printf("Inicie o jogo antes de executar este utilitario.\n");
         system("pause");
         return 1;
     }
@@ -67,36 +86,29 @@ int main(int argc, char* argv[]) {
 
     uintptr_t exe_base = GetProcessBaseAddress(hProc);
     if (!exe_base) {
-        printf("[ERRO] Não foi possível obter o Base Address de Disgaea_Mayhem.exe.\n");
+        printf("[ERRO] Nao foi possivel obter o Base Address de Disgaea_Mayhem.exe.\n");
         CloseHandle(hProc);
         system("pause");
         return 1;
     }
 
-    printf("[OK] Processo detectado (PID %lu) | Base Address: 0x%016llX\n", pid, (unsigned long long)exe_base);
+    printf("[OK] Processo detectado (PID %lu) | Base Address: 0x%016llX\n\n", pid, (unsigned long long)exe_base);
 
-    const uint8_t nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+    int applied = 0;
+    for (size_t i = 0; i < g_num_patches; ++i) {
+        uintptr_t target_addr = exe_base + g_patches[i].rva;
+        bool ok = PatchProcessCode(hProc, target_addr, g_patches[i].patch, 6);
+        printf("[%zu/%zu] %s (RVA 0x%06X): %s\n",
+               i + 1, g_num_patches, g_patches[i].desc, g_patches[i].rva,
+               ok ? "APLICADO COM SUCESSO" : "FALHA");
+        if (ok) applied++;
+    }
 
-    // 1. Patch DEC dword ptr [rbx + 0x178] at RVA 0x003C4ABF
-    uintptr_t target_dec = exe_base + 0x3C4ABF;
-    bool p1 = PatchProcessCode(hProc, target_dec, nop6, 6);
-    printf("[1/3] Patch DEC Energia (RVA 0x3C4ABF): %s\n", p1 ? "APLICADO COM SUCESSO" : "FALHA");
-
-    // 2. Patch MOV [rsi + 0x178], eax at RVA 0x004AD281
-    uintptr_t target_mov1 = exe_base + 0x4AD281;
-    bool p2 = PatchProcessCode(hProc, target_mov1, nop6, 6);
-    printf("[2/3] Patch Escrita Turno (RVA 0x4AD281): %s\n", p2 ? "APLICADO COM SUCESSO" : "FALHA");
-
-    // 3. Patch MOV [rbp + 0x178], eax at RVA 0x004BA6EE
-    uintptr_t target_mov2 = exe_base + 0x4BA6EE;
-    bool p3 = PatchProcessCode(hProc, target_mov2, nop6, 6);
-    printf("[3/3] Patch Fim de Turno (RVA 0x4BA6EE): %s\n", p3 ? "APLICADO COM SUCESSO" : "FALHA");
-
-    if (p1 && p2 && p3) {
-        printf("\n>>> SUCESSO: Instruções nativas de decremento de energia desativadas no processador!\n");
-        printf("A energia do Chara World agora nunca diminui durante os passos.\n");
+    if (applied == g_num_patches) {
+        printf("\n>>> SUCESSO: Todas as %d rotinas nativas de leitura de energia cravadas em 100!\n", applied);
+        printf("A energia do Chara World agora se mantem em 100/100 permanentemente.\n");
     } else {
-        printf("\n[AVISO] Um ou mais patches de instrução falharam.\n");
+        printf("\n[AVISO] %d de %zu patches foram aplicados.\n", applied, g_num_patches);
     }
 
     CloseHandle(hProc);
