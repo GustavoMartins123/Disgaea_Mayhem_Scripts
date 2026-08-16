@@ -4,6 +4,15 @@ Este documento estabelece as **regras arquiteturais e diretrizes obrigatórias**
 
 ---
 
+## 🏛️ Padrão Arquitetural de Inspiração: UE4SS Architecture
+
+Nosso ecossistema segue a arquitetura modular e desacoplada inspirada no padrão de modding do **UE4SS** (`Echoes of Aincrad / UE4SS`):
+* **Host / Loader Central:** O Mod Menu Overlay (`dxgi.dll` / `DisgaeaMayhemModMenu.dll`) atua puramente como orquestrador, gerenciador de UI (ImGui) e despachante de eventos.
+* **Mods Desacoplados:** Cada mod é um subsistema independente, com seu próprio ciclo de vida, configurações e lógica de execução isolada (DLLs nativas em C++ ou scripts em Lua).
+* **Comunicação por Bridge / Eventos:** A comunicação entre o Mod Menu e os mods ocorre exclusivamente via ciclo de vida genérico (`Mod_Enable()`, `Mod_Disable()`, `Mod_SetOption()`, `mod.json` ou `enabled.txt`).
+
+---
+
 ## 🚫 1. Regra das Linguagens Permitidas (C++ e Lua ONLY)
 
 * **PERMITIDO:**
@@ -19,7 +28,12 @@ Este documento estabelece as **regras arquiteturais e diretrizes obrigatórias**
 
 * O Mod Menu ([`mod_menu_overlay.cpp`](file:///C:/Disgaea_Mayhem_Scripts/native/mod_menu_overlay/mod_menu_overlay.cpp) / `DisgaeaMayhemModMenu.dll` / `dxgi.dll`) é **apenas um host genérico de UI (Overlay DirectX 12 com Dear ImGui) e despachante**.
 * **NUNCA** adicione lógica de jogo, regras de negócio ou tratamentos específicos de mods no código-fonte do Mod Menu (`mod_menu_overlay.cpp`).
-* O Mod Menu despacha ações de forma puramente genérica através de `ExecuteModActionGeneric(ModItem& mod)`, procurando por executáveis nativos `APLICAR_MOD_*.exe`, scripts `.bat` ou scripts Lua na pasta do respectivo mod.
+* Para mods do tipo **Toggle (`type: "toggle"`)**:
+  * Ao ativar (`ON`): o host despacha `NotifyModToggle` / `Mod_Enable()`.
+  * Ao desativar (`OFF`): o host despacha `NotifyModToggle` / `Mod_Disable()`.
+  * Ao alterar sliders/opções: o host despacha `NotifyModOptionChanged` / `Mod_SetOption()`.
+* Para mods do tipo **Action (`type: "action"`)**:
+  * O Mod Menu despacha de forma puramente genérica através de `ExecuteModActionGeneric(ModItem& mod)`, executando `APLICAR_MOD_*.exe`, `APLICAR_MOD_*.bat` ou scripts Lua na pasta do mod.
 
 ---
 
@@ -29,10 +43,16 @@ Cada mod deve ser completamente autônomo (*standalone*), independente e auto-co
 
 ```text
 mods/<nome_do_mod>/
-├── APLICAR_MOD_<nome>.exe   # Binário nativo compilado em C++
-├── APLICAR_MOD_<nome>.bat   # Lançador de 1 clique
-├── mod.json                 # Metadados, categoria, tipo (action/toggle) e opções
-└── README.md                # Instruções e documentação específica do mod
+├── enabled.txt              # Flag de ativacao rapida (1 = ativado, 0 = desativado)
+├── mod.json                 # Metadados, categoria, tipo (toggle/action), plugin e opcoes
+├── README.md                # Instrucoes e documentacao tecnica especifica do mod
+├── <nome_do_mod>.dll        # Hook/Plugin residente em memoria (se C++)
+├── APLICAR_MOD_<nome>.exe   # Utilitario standalone compilado em C++
+├── APLICAR_MOD_<nome>.bat   # Lancador de 1 clique
+└── Scripts/ (se Lua)        # Scripts modulares Lua
+    ├── config.lua           # Valores padrao de configuracao
+    ├── main.lua             # Bootstrap de inicializacao
+    └── main_impl.lua        # Implementacao e hooks das rotinas do jogo
 ```
 
 ---
@@ -55,6 +75,10 @@ Qualquer estrutura de classe, VTable, TypeDescriptor RTTI, offset de struct ou f
 ## ⚙️ 6. Compilação e Ferramentas Nativas
 
 * **Compilador C++:** MinGW GCC x64 (`C:\TDM-GCC-64\bin\g++.exe` / `gcc.exe`).
+* **Compilação de DLLs de Hook / Plugin:**
+  ```powershell
+  g++ -O2 -shared -static -s item_world.cpp -o item_world.dll
+  ```
 * **Compilação de Utilitários Standalone:**
   ```powershell
   g++ -O2 -static -s apply_mod.cpp -o APLICAR_MOD.exe
