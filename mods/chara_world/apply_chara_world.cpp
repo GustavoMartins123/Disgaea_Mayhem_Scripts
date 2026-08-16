@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <vector>
 
 DWORD GetGamePID() {
     DWORD pid = 0;
@@ -24,96 +23,83 @@ DWORD GetGamePID() {
     return pid;
 }
 
+uintptr_t GetProcessBaseAddress(HANDLE hProc) {
+    HMODULE hMods[1024] = {};
+    DWORD cbNeeded = 0;
+    if (EnumProcessModules(hProc, hMods, sizeof(hMods), &cbNeeded)) {
+        return (uintptr_t)hMods[0];
+    }
+    return 0;
+}
+
+bool PatchProcessCode(HANDLE hProc, uintptr_t addr, const uint8_t* patch, size_t size) {
+    DWORD old_protect = 0;
+    if (!VirtualProtectEx(hProc, (LPVOID)addr, size, PAGE_EXECUTE_READWRITE, &old_protect)) {
+        return false;
+    }
+    SIZE_T written = 0;
+    bool res = WriteProcessMemory(hProc, (LPVOID)addr, patch, size, &written) && (written == size);
+    VirtualProtectEx(hProc, (LPVOID)addr, size, old_protect, &old_protect);
+    FlushInstructionCache(hProc, (LPCVOID)addr, size);
+    return res;
+}
+
 int main(int argc, char* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     printf("=================================================================\n");
-    printf("  Disgaea Mayhem - Chara World Energia Infinita (Travar em 100)\n");
+    printf("  Disgaea Mayhem - Chara World Patch Nativo de Assembly (CPU)\n");
     printf("=================================================================\n\n");
 
     DWORD pid = GetGamePID();
     if (!pid) {
-        printf("[ERRO] Disgaea_Mayhem.exe nao esta em execucao!\n");
-        printf("Inicie o jogo antes de executar este utilitario.\n");
+        printf("[ERRO] Disgaea_Mayhem.exe não está em execução!\n");
+        printf("Inicie o jogo antes de executar este utilitário.\n");
         system("pause");
         return 1;
     }
 
     HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
     if (!hProc) {
-        printf("[ERRO] Nao foi possivel abrir o processo (PID %lu). Execute como Administrador.\n", pid);
+        printf("[ERRO] Falha ao abrir o processo (PID %lu). Execute como Administrador.\n", pid);
         system("pause");
         return 1;
     }
 
-    printf("[OK] Processo encontrado (PID %lu). Varrendo memoria...\n", pid);
-
-    SYSTEM_INFO si = {};
-    GetSystemInfo(&si);
-
-    uintptr_t curr = 0x10000;
-    uintptr_t max_addr = (uintptr_t)si.lpMaximumApplicationAddress;
-    MEMORY_BASIC_INFORMATION mbi = {};
-
-    std::vector<uintptr_t> energy_addrs;
-
-    while (curr < max_addr && VirtualQueryEx(hProc, (LPCVOID)curr, &mbi, sizeof(mbi))) {
-        if (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_READWRITE) && !(mbi.Protect & PAGE_GUARD)) {
-            std::vector<uint8_t> buffer(mbi.RegionSize);
-            SIZE_T bytesRead = 0;
-            if (ReadProcessMemory(hProc, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead) && bytesRead >= 16) {
-                for (size_t i = 0; i + 16 <= bytesRead; i += 4) {
-                    int32_t* p = (int32_t*)(buffer.data() + i);
-                    if (p[1] == 100 && p[0] >= 0 && p[0] <= 100 && p[2] == 0) {
-                        uintptr_t addr = (uintptr_t)mbi.BaseAddress + i;
-                        int32_t val = 100;
-                        if (WriteProcessMemory(hProc, (LPVOID)addr, &val, 4, NULL)) {
-                            energy_addrs.push_back(addr);
-                        }
-                    }
-                }
-            }
-        }
-        curr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+    uintptr_t exe_base = GetProcessBaseAddress(hProc);
+    if (!exe_base) {
+        printf("[ERRO] Não foi possível obter o Base Address de Disgaea_Mayhem.exe.\n");
+        CloseHandle(hProc);
+        system("pause");
+        return 1;
     }
 
-    printf("[SUCESSO] %zu blocos de energia do Chara World identificados e travados em 100!\n", energy_addrs.size());
+    printf("[OK] Processo detectado (PID %lu) | Base Address: 0x%016llX\n", pid, (unsigned long long)exe_base);
 
-    // Se iniciado manualmente, entra em modo guardiao continuo
-    printf("\n[MODO GUARDIÃO ATIVO] Mantendo energia em 100 em tempo real...\n");
-    printf("Pressione Ctrl+C para fechar quando terminar o Chara World.\n\n");
+    const uint8_t nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 
-    int ticks = 0;
-    while (true) {
-        ticks++;
-        for (uintptr_t addr : energy_addrs) {
-            int32_t val = 100;
-            WriteProcessMemory(hProc, (LPVOID)addr, &val, 4, NULL);
-        }
+    // 1. Patch DEC dword ptr [rbx + 0x178] at RVA 0x003C4ABF
+    uintptr_t target_dec = exe_base + 0x3C4ABF;
+    bool p1 = PatchProcessCode(hProc, target_dec, nop6, 6);
+    printf("[1/3] Patch DEC Energia (RVA 0x3C4ABF): %s\n", p1 ? "APLICADO COM SUCESSO" : "FALHA");
 
-        if (ticks % 20 == 0) {
-            // Re-sweep periodically in case of new turn allocations
-            curr = 0x10000;
-            while (curr < max_addr && VirtualQueryEx(hProc, (LPCVOID)curr, &mbi, sizeof(mbi))) {
-                if (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_READWRITE) && !(mbi.Protect & PAGE_GUARD)) {
-                    std::vector<uint8_t> buffer(mbi.RegionSize);
-                    SIZE_T bytesRead = 0;
-                    if (ReadProcessMemory(hProc, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead) && bytesRead >= 16) {
-                        for (size_t i = 0; i + 16 <= bytesRead; i += 4) {
-                            int32_t* p = (int32_t*)(buffer.data() + i);
-                            if (p[1] == 100 && p[0] >= 0 && p[0] <= 100 && p[2] == 0) {
-                                uintptr_t addr = (uintptr_t)mbi.BaseAddress + i;
-                                int32_t val = 100;
-                                WriteProcessMemory(hProc, (LPVOID)addr, &val, 4, NULL);
-                            }
-                        }
-                    }
-                }
-                curr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
-            }
-        }
-        Sleep(50);
+    // 2. Patch MOV [rsi + 0x178], eax at RVA 0x004AD281
+    uintptr_t target_mov1 = exe_base + 0x4AD281;
+    bool p2 = PatchProcessCode(hProc, target_mov1, nop6, 6);
+    printf("[2/3] Patch Escrita Turno (RVA 0x4AD281): %s\n", p2 ? "APLICADO COM SUCESSO" : "FALHA");
+
+    // 3. Patch MOV [rbp + 0x178], eax at RVA 0x004BA6EE
+    uintptr_t target_mov2 = exe_base + 0x4BA6EE;
+    bool p3 = PatchProcessCode(hProc, target_mov2, nop6, 6);
+    printf("[3/3] Patch Fim de Turno (RVA 0x4BA6EE): %s\n", p3 ? "APLICADO COM SUCESSO" : "FALHA");
+
+    if (p1 && p2 && p3) {
+        printf("\n>>> SUCESSO: Instruções nativas de decremento de energia desativadas no processador!\n");
+        printf("A energia do Chara World agora nunca diminui durante os passos.\n");
+    } else {
+        printf("\n[AVISO] Um ou mais patches de instrução falharam.\n");
     }
 
     CloseHandle(hProc);
+    Sleep(2000);
     return 0;
 }
