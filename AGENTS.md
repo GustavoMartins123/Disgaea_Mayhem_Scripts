@@ -67,15 +67,7 @@ mods/<nome_do_mod>/
 
 ---
 
-## 🔄 5. Sincronização Obrigatória com o Repositório
-
-Todas as modificações de código, scripts, documentação, metadados JSON e binários compilados **DEVEM** ser mantidas 100% sincronizadas entre:
-1. **Repositório Central:** `C:\Disgaea_Mayhem_Scripts`
-2. **Pasta do Jogo Instalado:** `E:\Steam\steamapps\common\Disgaea Mayhem`
-
----
-
-## 📚 6. Documentação Modular de Engenharia Reversa na Pasta `docs/`
+## 📚 5. Documentação Modular de Engenharia Reversa na Pasta `docs/`
 
 Qualquer estrutura de classe, VTable, TypeDescriptor RTTI, offset de struct ou fluxo de desmontagem de `Disgaea_Mayhem.exe` descoberto deve ser catalogado de forma modular em `docs/`:
 * [`docs/ESTRUTURA_CLASSES_REVERSA.md`](file:///C:/Disgaea_Mayhem_Scripts/docs/ESTRUTURA_CLASSES_REVERSA.md) (Índice mestre consolidado)
@@ -85,7 +77,7 @@ Qualquer estrutura de classe, VTable, TypeDescriptor RTTI, offset de struct ou f
 
 ---
 
-## ⚙️ 7. Compilação e Ferramentas Nativas
+## ⚙️ 6. Compilação e Ferramentas Nativas
 
 * **Compilador C++:** MinGW GCC x64 (`C:\TDM-GCC-64\bin\g++.exe` / `gcc.exe`).
 * **Compilação de DLLs de Hook / Plugin:**

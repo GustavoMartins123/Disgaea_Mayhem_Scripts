@@ -1,5 +1,34 @@
-# Git ignore for Disgaea Mayhem Mod Scripts
-*.pyc
-__pycache__/
-.tempmediaStorage/
+# =============================================================================
+# Disgaea Mayhem Modding Ecosystem - .gitignore
+# =============================================================================
+
+# 1. Ignorar todos os arquivos e pastas da raiz por padrao (jogo original Steam)
+/*
+
+# 2. Whitelist: rastrear apenas arquivos e pastas do projeto de mods
+!/.gitignore
+!/AGENTS.md
+!/README.md
+!/INSTALAR_MOD.*
+!/dxgi.dll
+!/SmokeAPI.config.json
+!/mods/
+!/docs/
+!/native/
+!/tools/
+!/database_mods/
+!/SmokeAPI/
+
+# 3. Ignorar arquivos temporarios, objetos de compilacao, backups e logs
+*.o
+*.obj
+*.tmp
+*.old*
 *.log
+*.bak
+__pycache__/
+mods/mod_loader.log
+mods/safe_backup/backups/
+mods/safe_backup/*.bak
+native/mod_menu_overlay/build/obj/
+native/mod_menu_overlay/build/*.pdb
