@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <tlhelp32.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -47,19 +46,37 @@ static bool CheckEnabledTxt() {
 }
 
 // -----------------------------------------------------------------------------
-// Safe Pointer Validation
+// Safe Memory Access
 // -----------------------------------------------------------------------------
-static inline bool IsValidReadPtr(const void* p, size_t size = 8) {
-    if (!p) return false;
-    uintptr_t addr = (uintptr_t)p;
+static inline bool IsValidMemoryRange(uintptr_t addr, size_t size, DWORD required_protect) {
     if (addr < 0x10000 || addr > 0x7FFFFFFEFFFF) return false;
-    
     MEMORY_BASIC_INFORMATION mbi = {};
-    if (VirtualQuery(p, &mbi, sizeof(mbi))) {
-        if (mbi.State == MEM_COMMIT &&
-            (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_READONLY)) {
-            return (addr + size <= (uintptr_t)mbi.BaseAddress + mbi.RegionSize);
+    if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) && !(mbi.Protect & PAGE_NOACCESS)) {
+            if (required_protect == PAGE_READWRITE) {
+                if ((mbi.Protect & PAGE_READWRITE) || (mbi.Protect & PAGE_EXECUTE_READWRITE)) {
+                    return (addr + size <= (uintptr_t)mbi.BaseAddress + mbi.RegionSize);
+                }
+            } else {
+                return (addr + size <= (uintptr_t)mbi.BaseAddress + mbi.RegionSize);
+            }
         }
+    }
+    return false;
+}
+
+static inline bool SafeWrite32(uintptr_t addr, int32_t val) {
+    if (IsValidMemoryRange(addr, sizeof(int32_t), PAGE_READWRITE)) {
+        *(int32_t*)addr = val;
+        return true;
+    }
+    return false;
+}
+
+static inline bool SafeReadPtr(uintptr_t addr, uintptr_t* out_val) {
+    if (IsValidMemoryRange(addr, sizeof(uintptr_t), PAGE_READONLY)) {
+        *out_val = *(uintptr_t*)addr;
+        return true;
     }
     return false;
 }
@@ -74,14 +91,14 @@ static void* Hook_CWInfo_Alloc(void* a1) {
     void* result = o_CWInfo_Alloc(a1);
     if (result && g_mod_enabled) {
         g_cached_cw_info = (uintptr_t)result;
-        *(int32_t*)((uintptr_t)result + 0x174) = g_target_energy; // MaxEnergy
-        *(int32_t*)((uintptr_t)result + 0x178) = g_target_energy; // CurrentEnergy
+        SafeWrite32((uintptr_t)result + 0x174, g_target_energy);
+        SafeWrite32((uintptr_t)result + 0x178, g_target_energy);
     }
     return result;
 }
 
 // -----------------------------------------------------------------------------
-// Continuous Energy Lock Thread
+// Lightweight Deterministic Energy Maintainer
 // -----------------------------------------------------------------------------
 static DWORD WINAPI CharaWorldMonitorThread(LPVOID lpParam) {
     g_thread_running = true;
@@ -89,7 +106,7 @@ static DWORD WINAPI CharaWorldMonitorThread(LPVOID lpParam) {
     int tick_count = 0;
 
     while (g_thread_running) {
-        if (++tick_count % 10 == 0) {
+        if (++tick_count % 20 == 0) {
             if (!CheckEnabledTxt()) {
                 g_mod_enabled = false;
             }
@@ -97,67 +114,37 @@ static DWORD WINAPI CharaWorldMonitorThread(LPVOID lpParam) {
 
         if (g_mod_enabled && g_freeze_energy) {
             // 1. Maintain Logic Energy in CCharacterWorldInformation
-            if (g_cached_cw_info && IsValidReadPtr((const void*)g_cached_cw_info, 0x200)) {
-                if (*(uintptr_t*)g_cached_cw_info == g_vtable_cw_info) {
-                    int32_t* p_energy = (int32_t*)(g_cached_cw_info + 0x178);
-                    if (*p_energy != g_target_energy) {
-                        *p_energy = g_target_energy;
-                    }
+            if (g_cached_cw_info) {
+                uintptr_t vptr = 0;
+                if (SafeReadPtr(g_cached_cw_info, &vptr) && vptr == g_vtable_cw_info) {
+                    SafeWrite32(g_cached_cw_info + 0x174, g_target_energy);
+                    SafeWrite32(g_cached_cw_info + 0x178, g_target_energy);
                 } else {
                     g_cached_cw_info = 0;
                 }
-            } else {
-                g_cached_cw_info = 0;
             }
 
             // 2. Maintain UI Display in CUIUnion_CharacterWorld_Energy
-            if (g_cached_cw_ui && IsValidReadPtr((const void*)g_cached_cw_ui, 0x100)) {
-                if (*(uintptr_t*)g_cached_cw_ui == g_vtable_cw_energy_ui) {
-                    *(int32_t*)(g_cached_cw_ui + 0x70) = g_target_energy;
-                    *(int32_t*)(g_cached_cw_ui + 0x78) = g_target_energy;
-                    *(int32_t*)(g_cached_cw_ui + 0x7C) = g_target_energy;
-                    *(int32_t*)(g_cached_cw_ui + 0x80) = g_target_energy;
+            if (g_cached_cw_ui) {
+                uintptr_t vptr = 0;
+                if (SafeReadPtr(g_cached_cw_ui, &vptr) && vptr == g_vtable_cw_energy_ui) {
+                    SafeWrite32(g_cached_cw_ui + 0x70, g_target_energy);
+                    SafeWrite32(g_cached_cw_ui + 0x78, g_target_energy);
+                    SafeWrite32(g_cached_cw_ui + 0x7C, g_target_energy);
+                    SafeWrite32(g_cached_cw_ui + 0x80, g_target_energy);
                 } else {
                     g_cached_cw_ui = 0;
                 }
-            } else {
-                g_cached_cw_ui = 0;
-            }
-
-            // 3. Fallback scan if not captured by hook
-            if (!g_cached_cw_info || !g_cached_cw_ui) {
-                HANDLE heaps[64] = {};
-                DWORD num_heaps = GetProcessHeaps(64, heaps);
-                for (DWORD h = 0; h < num_heaps && (!g_cached_cw_info || !g_cached_cw_ui); ++h) {
-                    PROCESS_HEAP_ENTRY entry = {};
-                    entry.lpData = NULL;
-                    while (HeapWalk(heaps[h], &entry)) {
-                        if ((entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) && entry.cbData >= 0x200 && entry.lpData) {
-                            uint8_t* p = (uint8_t*)entry.lpData;
-                            uintptr_t vptr = *(uintptr_t*)p;
-                            if (!g_cached_cw_info && vptr == g_vtable_cw_info) {
-                                g_cached_cw_info = (uintptr_t)p;
-                                *(int32_t*)(p + 0x178) = g_target_energy;
-                            } else if (!g_cached_cw_ui && vptr == g_vtable_cw_energy_ui) {
-                                g_cached_cw_ui = (uintptr_t)p;
-                                *(int32_t*)(p + 0x70) = g_target_energy;
-                                *(int32_t*)(p + 0x78) = g_target_energy;
-                                *(int32_t*)(p + 0x7C) = g_target_energy;
-                                *(int32_t*)(p + 0x80) = g_target_energy;
-                            }
-                        }
-                    }
-                }
             }
         }
-        Sleep(50);
+        Sleep(100);
     }
 
     return 0;
 }
 
 // -----------------------------------------------------------------------------
-// Mod Plugin Interface Exports
+// Mod Plugin Interface Exports (UE4SS + ModMenu Standard)
 // -----------------------------------------------------------------------------
 extern "C" {
     __declspec(dllexport) void Mod_Enable() {
@@ -173,7 +160,6 @@ extern "C" {
         g_cached_cw_ui = 0;
     }
 
-    // UE4SS-Style lifecycle bindings
     __declspec(dllexport) void* start_mod() {
         Mod_Enable();
         return (void*)1;
@@ -198,7 +184,7 @@ extern "C" {
 }
 
 // -----------------------------------------------------------------------------
-// DLL Entry Point & Engine Hooks Setup
+// DLL Entry Point
 // -----------------------------------------------------------------------------
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch (fdwReason) {
@@ -211,11 +197,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
             g_vtable_cw_info = g_exe_base + 0xA57610;
             g_vtable_cw_energy_ui = g_exe_base + 0xA71728;
 
-            // Initialize MinHook for instant deterministic interception
-            MH_Initialize();
-            void* target_alloc = (void*)(g_exe_base + 0x4DEF80);
-            MH_CreateHook(target_alloc, (LPVOID)&Hook_CWInfo_Alloc, reinterpret_cast<LPVOID*>(&o_CWInfo_Alloc));
-            MH_EnableHook(target_alloc);
+            // Safe MinHook initialization
+            if (MH_Initialize() == MH_OK) {
+                void* target_alloc = (void*)(g_exe_base + 0x4DEF80);
+                MH_CreateHook(target_alloc, (LPVOID)&Hook_CWInfo_Alloc, reinterpret_cast<LPVOID*>(&o_CWInfo_Alloc));
+                MH_EnableHook(target_alloc);
+            }
 
             if (CheckEnabledTxt()) {
                 Mod_Enable();
@@ -230,7 +217,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
             MH_DisableHook(MH_ALL_HOOKS);
             MH_Uninitialize();
             if (g_monitor_thread) {
-                WaitForSingleObject(g_monitor_thread, 500);
+                WaitForSingleObject(g_monitor_thread, 200);
                 CloseHandle(g_monitor_thread);
                 g_monitor_thread = NULL;
             }
