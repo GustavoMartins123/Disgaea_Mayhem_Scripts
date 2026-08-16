@@ -1,6 +1,5 @@
 @echo off
-setlocal
+chcp 65001 >nul
 cd /d "%~dp0"
-python APLICAR_MOD_DLC.py
-echo.
+"APLICAR_MOD_DLC.exe"
 pause

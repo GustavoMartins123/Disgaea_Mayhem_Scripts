@@ -7,9 +7,9 @@
   "description": "Acelera a progressão de equipamentos e armas no Mundo dos Itens, aumentando múltiplos níveis a cada andar concluído e garantindo subjugação automática de inocentes (100% Subdued).",
   "type": "action",
   "action_label": "Apply",
-  "script": "APLICAR_MOD_ITEM_WORLD.py",
+  "executable": "APLICAR_MOD_ITEM_WORLD.exe",
   "components": [
-    "mods/item_world/APLICAR_MOD_ITEM_WORLD.py",
+    "mods/item_world/APLICAR_MOD_ITEM_WORLD.exe",
     "mods/item_world/APLICAR_MOD_ITEM_WORLD.bat"
   ],
   "options": [

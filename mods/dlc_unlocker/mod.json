@@ -7,7 +7,11 @@
   "description": "Emula ISteamApps e ISteamInventory via SmokeAPI, converte consumíveis para resgate offline infinito no NPC Carlbunch e sincroniza 30x Boost Tickets com multiplicador de +900% na sessão ativa.",
   "type": "action",
   "action_label": "Apply",
-  "components": "SmokeAPI Wrapper + Inventário Extra [1,2,3,4,5] + Tabelas Offline + Sincronizador RAM",
+  "executable": "APLICAR_MOD_DLC.exe",
+  "components": [
+    "mods/dlc_unlocker/APLICAR_MOD_DLC.exe",
+    "mods/dlc_unlocker/APLICAR_MOD_DLC.bat"
+  ],
   "options": [
     {
       "id": "ticket_amount",

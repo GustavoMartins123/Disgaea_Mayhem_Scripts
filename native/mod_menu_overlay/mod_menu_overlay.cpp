@@ -810,17 +810,36 @@ static int g_selected_mod = 0;
 static bool g_mods_scanned = false;
 
 // -----------------------------------------------------------------------------
-// Generic Standalone Mod Action Dispatcher (Completely Decoupled)
+// Generic Standalone Mod Action Dispatcher (C++ Native / Lua Only)
 // -----------------------------------------------------------------------------
 void ExecuteModActionGeneric(ModItem& mod) {
     mod.action_applied = true;
     
-    // 1. Check for standalone Batch script in mod folder (e.g. mods/<mod_id>/APLICAR_MOD_*.bat)
+    // 1. Check for standalone Native C++ Executable (e.g. mods/<mod_id>/APLICAR_MOD_*.exe)
     char search_pattern[MAX_PATH] = {};
-    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.bat", mod.id);
+    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.exe", mod.id);
     
     WIN32_FIND_DATAA fd = {};
     HANDLE hFind = FindFirstFileA(search_pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        char exe_path[MAX_PATH] = {};
+        std::snprintf(exe_path, sizeof(exe_path), "mods/%s/%s", mod.id, fd.cFileName);
+        FindClose(hFind);
+        
+        STARTUPINFOA si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessA(NULL, exe_path, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+        std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", fd.cFileName);
+        return;
+    }
+
+    // 2. Check for standalone Batch script (e.g. mods/<mod_id>/APLICAR_MOD_*.bat)
+    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.bat", mod.id);
+    hFind = FindFirstFileA(search_pattern, &fd);
     if (hFind != INVALID_HANDLE_VALUE) {
         char bat_path[MAX_PATH] = {};
         std::snprintf(bat_path, sizeof(bat_path), "mods/%s/%s", mod.id, fd.cFileName);
@@ -839,16 +858,16 @@ void ExecuteModActionGeneric(ModItem& mod) {
         return;
     }
     
-    // 2. Check for standalone Python script in mod folder (e.g. mods/<mod_id>/APLICAR_MOD_*.py)
-    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.py", mod.id);
+    // 3. Check for standalone Lua script (e.g. mods/<mod_id>/APLICAR_MOD_*.lua)
+    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.lua", mod.id);
     hFind = FindFirstFileA(search_pattern, &fd);
     if (hFind != INVALID_HANDLE_VALUE) {
-        char py_path[MAX_PATH] = {};
-        std::snprintf(py_path, sizeof(py_path), "mods/%s/%s", mod.id, fd.cFileName);
+        char lua_path[MAX_PATH] = {};
+        std::snprintf(lua_path, sizeof(lua_path), "mods/%s/%s", mod.id, fd.cFileName);
         FindClose(hFind);
         
         char cmd[MAX_PATH * 2] = {};
-        std::snprintf(cmd, sizeof(cmd), "python \"%s\"", py_path);
+        std::snprintf(cmd, sizeof(cmd), "lua \"%s\"", lua_path);
         STARTUPINFOA si = {};
         si.cb = sizeof(si);
         PROCESS_INFORMATION pi = {};
@@ -856,7 +875,7 @@ void ExecuteModActionGeneric(ModItem& mod) {
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
         }
-        std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", fd.cFileName);
+        std::snprintf(mod.status, sizeof(mod.status), "Executado Lua: %s", fd.cFileName);
         return;
     }
     
