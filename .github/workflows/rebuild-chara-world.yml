@@ -1,0 +1,50 @@
+name: Rebuild Chara World
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mods/chara_world/chara_world.cpp'
+      - 'mods/chara_world/apply_chara_world.cpp'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Build Chara World binaries
+        shell: msys2 {0}
+        run: |
+          g++ -std=c++17 -O2 -s -shared -static-libgcc -static-libstdc++ \
+            mods/chara_world/chara_world.cpp \
+            -o mods/chara_world/chara_world.dll
+
+          g++ -std=c++17 -O2 -s -static-libgcc -static-libstdc++ \
+            mods/chara_world/apply_chara_world.cpp \
+            -o mods/chara_world/APLICAR_MOD_CHARA_WORLD.exe \
+            -lpsapi
+
+      - name: Commit rebuilt binaries
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mods/chara_world/chara_world.dll mods/chara_world/APLICAR_MOD_CHARA_WORLD.exe
+          if (git diff --cached --quiet) {
+            Write-Host 'Binaries unchanged.'
+            exit 0
+          }
+          git commit -m 'build(chara_world): rebuild validated lifecycle binaries'
+          git push origin HEAD:main
