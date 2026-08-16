@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <algorithm>
+#include <string.h>
+
+#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
 
 // -----------------------------------------------------------------------------
 // Global Mod State
@@ -67,12 +69,6 @@ static inline bool IsValidReadPtr(const void* p, size_t size = 8) {
 static DWORD WINAPI ItemWorldMonitorThread(LPVOID lpParam) {
     g_thread_running = true;
 
-    g_exe_base = (uintptr_t)GetModuleHandleA(NULL);
-    if (!g_exe_base) g_exe_base = 0x140000000;
-
-    g_vtable_item_status = g_exe_base + 0xA252C0;
-    g_vtable_item_world = g_exe_base + 0xA251F0;
-
     int tick_count = 0;
 
     while (g_thread_running) {
@@ -83,45 +79,41 @@ static DWORD WINAPI ItemWorldMonitorThread(LPVOID lpParam) {
         }
 
         if (g_mod_enabled) {
-            uintptr_t address = 0x0000000010000000ULL;
-            const uintptr_t max_scan_addr = 0x000003FFFFFFFFFFULL;
-            MEMORY_BASIC_INFORMATION mbi = {};
+            HANDLE heaps[64] = {};
+            DWORD num_heaps = GetProcessHeaps(64, heaps);
+            for (DWORD h = 0; h < num_heaps; ++h) {
+                PROCESS_HEAP_ENTRY entry = {};
+                entry.lpData = NULL;
+                while (HeapWalk(heaps[h], &entry)) {
+                    if ((entry.wFlags & PROCESS_HEAP_ENTRY_BUSY) && entry.cbData >= 0x100 && entry.lpData) {
+                        uint8_t* p = (uint8_t*)entry.lpData;
+                        uintptr_t vptr = *(uintptr_t*)p;
 
-            while (address < max_scan_addr && VirtualQuery((LPCVOID)address, &mbi, sizeof(mbi))) {
-                if (mbi.State == MEM_COMMIT &&
-                    (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE)) {
-                    uint8_t* buffer = (uint8_t*)mbi.BaseAddress;
-                    const size_t size = mbi.RegionSize;
+                        if (vptr == g_vtable_item_world) {
+                            // Offset +0x74: Level increment per floor
+                            int32_t* p_level_inc = (int32_t*)(p + 0x74);
+                            if (*p_level_inc != g_levels_per_floor && *p_level_inc >= 0 && *p_level_inc <= 100) {
+                                *p_level_inc = g_levels_per_floor;
+                            }
 
-                    if (size >= 0x400 && size <= 0x20000000) {
-                        for (size_t i = 0; i <= size - 0x100; i += 8) {
-                            uintptr_t vptr = *(uintptr_t*)(buffer + i);
-                            if (vptr == g_vtable_item_world) {
-                                uint8_t* iw_obj = buffer + i;
-                                
-                                int32_t* p_level_inc = (int32_t*)(iw_obj + 0x74);
-                                if (*p_level_inc != g_levels_per_floor && *p_level_inc >= 0 && *p_level_inc <= 100) {
-                                    *p_level_inc = g_levels_per_floor;
-                                }
-
-                                uintptr_t item_ptr = *(uintptr_t*)(iw_obj + 0x40);
-                                if (item_ptr && IsValidReadPtr((const void*)item_ptr, 0x400)) {
-                                    uint8_t* item_obj = (uint8_t*)item_ptr;
-                                    if (*(uintptr_t*)item_obj == g_vtable_item_status) {
-                                        if (g_auto_subdue) {
-                                            uintptr_t inno_start = *(uintptr_t*)(item_obj + 0x358);
-                                            uintptr_t inno_end = *(uintptr_t*)(item_obj + 0x360);
-                                            if (inno_start && inno_end >= inno_start && (inno_end - inno_start) <= 64 * 8) {
-                                                for (uintptr_t p = inno_start; p < inno_end; p += 8) {
-                                                    uint8_t* inno_obj = *(uint8_t**)p;
-                                                    if (inno_obj && IsValidReadPtr(inno_obj, 0x20)) {
-                                                        uint32_t* p_subdued = (uint32_t*)(inno_obj + 0x14);
-                                                        int32_t* p_power = (int32_t*)(inno_obj + 0x18);
-                                                        if (*p_subdued == 0) {
-                                                            *p_subdued = 1;
-                                                            if (*p_power > 0) {
-                                                                *p_power *= 2;
-                                                            }
+                            // Offset +0x40: Pointer to active CItemStatus
+                            uintptr_t item_ptr = *(uintptr_t*)(p + 0x40);
+                            if (item_ptr && IsValidReadPtr((const void*)item_ptr, 0x400)) {
+                                uint8_t* item_obj = (uint8_t*)item_ptr;
+                                if (*(uintptr_t*)item_obj == g_vtable_item_status) {
+                                    if (g_auto_subdue) {
+                                        uintptr_t inno_start = *(uintptr_t*)(item_obj + 0x358);
+                                        uintptr_t inno_end = *(uintptr_t*)(item_obj + 0x360);
+                                        if (inno_start && inno_end >= inno_start && (inno_end - inno_start) <= 64 * 8) {
+                                            for (uintptr_t inno_p = inno_start; inno_p < inno_end; inno_p += 8) {
+                                                uint8_t* inno_obj = *(uint8_t**)inno_p;
+                                                if (inno_obj && IsValidReadPtr(inno_obj, 0x20)) {
+                                                    uint32_t* p_subdued = (uint32_t*)(inno_obj + 0x14);
+                                                    int32_t* p_power = (int32_t*)(inno_obj + 0x18);
+                                                    if (*p_subdued == 0) {
+                                                        *p_subdued = 1;
+                                                        if (*p_power > 0) {
+                                                            *p_power *= 2;
                                                         }
                                                     }
                                                 }
@@ -133,7 +125,6 @@ static DWORD WINAPI ItemWorldMonitorThread(LPVOID lpParam) {
                         }
                     }
                 }
-                address = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
             }
         }
         Sleep(100);
@@ -178,14 +169,22 @@ extern "C" {
 // -----------------------------------------------------------------------------
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch (fdwReason) {
-        case DLL_PROCESS_ATTACH:
+        case DLL_PROCESS_ATTACH: {
             DisableThreadLibraryCalls(hinstDLL);
+
+            g_exe_base = (uintptr_t)GetModuleHandleA(NULL);
+            if (!g_exe_base) g_exe_base = 0x140000000;
+
+            g_vtable_item_status = g_exe_base + 0xA252C0;
+            g_vtable_item_world = g_exe_base + 0xA251F0;
+
             if (CheckEnabledTxt()) {
                 Mod_Enable();
             } else {
                 Mod_Disable();
             }
             break;
+        }
         case DLL_PROCESS_DETACH:
             g_thread_running = false;
             g_mod_enabled = false;

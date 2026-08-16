@@ -2113,26 +2113,30 @@ void RemoveHooks() {
 
 
 
-DWORD WINAPI AutoInitThread(LPVOID) {
-    Sleep(50);
+DWORD WINAPI ModLoaderStartupThread(LPVOID) {
+    ScanAndDiscoverMods();
+    return 0;
+}
 
+DWORD WINAPI AutoInitThread(LPVOID) {
     HMODULE game_exe = GetModuleHandleW(nullptr);
     if (!game_exe) {
         return 0;
     }
+
+    // 1. Spawns Mod Loader immediately in background with 0ms delay!
+    HANDLE loader_th = CreateThread(nullptr, 0, ModLoaderStartupThread, nullptr, 0, nullptr);
+    if (loader_th) CloseHandle(loader_th);
 
     g_shared = &g_embedded_shared;
     InterlockedExchange(&g_shared->status, STATUS_WAITING);
     InterlockedExchange(&g_shared->error_code, 0);
     g_shared->error_message[0] = '\0';
 
-    // Install DirectX 12 hooks (pure overlay without modifying game bytecode)
+    // 2. Install DirectX 12 hooks (pure overlay without modifying game bytecode)
     if (CreateHooks()) {
         SetStatus(STATUS_HOOKS_INSTALLED);
     }
-
-    // Auto-discover and initialize all active mods on game boot!
-    ScanAndDiscoverMods();
 
     return 0;
 }
