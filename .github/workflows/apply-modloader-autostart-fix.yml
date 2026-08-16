@@ -6,6 +6,7 @@ on:
       - agent/modloader-autostart-fix-v2
     paths:
       - .github/workflows/apply-modloader-autostart-fix.yml
+      - .github/patches/**
   workflow_dispatch:
 
 permissions:
