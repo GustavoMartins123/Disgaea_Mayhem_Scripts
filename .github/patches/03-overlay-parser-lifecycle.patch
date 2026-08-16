@@ -1,0 +1,90 @@
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -889,7 +915,7 @@ void ExecuteModActionGeneric(ModItem& mod) {
+ namespace ModLogger {
+     static FILE* g_log_file = nullptr;
+     
+-    inline void Init(const char* exe_dir) {
++    void Init(const char* exe_dir) {
+         if (!g_log_file) {
+             char log_path[MAX_PATH] = {};
+             std::snprintf(log_path, sizeof(log_path), "%s\\mods\\mod_loader.log", exe_dir);
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -903,14 +929,18 @@ namespace ModLogger {
+         }
+     }
+ 
+-    inline void Log(const char* fmt, ...) {
++    void Log(const char* fmt, ...) {
+         if (!g_log_file) return;
+         char buf[1024] = {};
+         va_list args;
+         va_start(args, fmt);
+         vsnprintf(buf, sizeof(buf), fmt, args);
+         va_end(args);
+-        fprintf(g_log_file, "%s\n", buf);
++        SYSTEMTIME now = {};
++        GetLocalTime(&now);
++        fprintf(g_log_file, "[%02u:%02u:%02u.%03u][T%lu] %s\n",
++                now.wHour, now.wMinute, now.wSecond, now.wMilliseconds,
++                GetCurrentThreadId(), buf);
+         fflush(g_log_file);
+     }
+ }
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -1004,8 +1034,14 @@ void NotifyModToggle(ModItem& mod) {
+             pfn_Mod_SetOption fn_set_opt = (pfn_Mod_SetOption)(void*)GetProcAddress(hMod, "Mod_SetOption");
+             
+             if (mod.enabled) {
+-                if (fn_enable) fn_enable();
+-                else if (fn_start) fn_start();
++                bool dispatched = false;
++                if (fn_enable) { fn_enable(); dispatched = true; }
++                else if (fn_start) { fn_start(); dispatched = true; }
++                if (!dispatched) {
++                    ModLogger::Log("[ModLoader] [ABI_ERROR] DLL sem Mod_Enable/start_mod: %s", dll_path);
++                    std::snprintf(mod.status, sizeof(mod.status), "ERRO: DLL sem ABI de ativacao.");
++                    return;
++                }
+ 
+                 if (fn_set_opt) {
+                     for (auto& opt : mod.options) {
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -1024,9 +1060,12 @@ void NotifyModToggle(ModItem& mod) {
+             return;
+         }
+     } else {
+-        ModLogger::Log("[ModLoader] [WARN] Mod sem DLL residente: %s", mod.name);
++        ModLogger::Log("[ModLoader] [CONFIG_ERROR] Toggle sem DLL residente: %s (Dir: %s, Id: %s)",
++                       mod.name, target_folder, mod.id);
++        std::snprintf(mod.status, sizeof(mod.status), "ERRO: toggle sem DLL residente.");
++        return;
+     }
+-    
++
+     std::snprintf(mod.status, sizeof(mod.status), mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
+ }
+ 
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -1106,6 +1145,7 @@ int JsonExtractInt(const std::string& json, const std::string& key, int default_
+     if (pos == std::string::npos) return default_val;
+     pos = json.find(':', pos + search.length());
+     if (pos == std::string::npos) return default_val;
++    ++pos;
+     while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\r' || json[pos] == '\n')) {
+         pos++;
+     }
