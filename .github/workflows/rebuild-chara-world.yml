@@ -6,6 +6,7 @@ on:
     paths:
       - 'mods/chara_world/chara_world.cpp'
       - 'mods/chara_world/apply_chara_world.cpp'
+      - '.github/workflows/rebuild-chara-world.yml'
 
 permissions:
   contents: write
