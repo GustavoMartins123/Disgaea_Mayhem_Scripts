@@ -37,13 +37,16 @@ jobs:
           git fetch origin main
           git checkout -B modloader-publish origin/main
 
-          Get-ChildItem $patchDir -Filter '*.patch' | Sort-Object Name | ForEach-Object {
-            Write-Host "Applying $($_.Name)"
-            git apply -p2 --check $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Patch check failed: $($_.Name)" }
-            git apply -p2 $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Patch apply failed: $($_.Name)" }
-          }
+          Get-ChildItem $patchDir -Filter '*.patch' |
+            Where-Object { $_.Name -ne '00-installer.patch' } |
+            Sort-Object Name |
+            ForEach-Object {
+              Write-Host "Applying $($_.Name)"
+              git apply -p2 --check $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Patch check failed: $($_.Name)" }
+              git apply -p2 $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Patch apply failed: $($_.Name)" }
+            }
 
           Copy-Item 'database_mods\cheatSetting.dat' 'mods\cheat_shop\cheatSetting.dat' -Force
           Copy-Item 'database_mods\wish.dat' 'mods\dark_assembly\wish.dat' -Force
@@ -105,7 +108,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
           git add -- `
-            'INSTALAR_MOD.cpp' 'INSTALAR_MOD.exe' 'dxgi.dll' `
+            'INSTALAR_MOD.exe' 'dxgi.dll' `
             'mods/cheat_shop' 'mods/dark_assembly' 'mods/dlc_unlocker/mod.json' `
             'mods/native/DisgaeaMayhemModMenu.dll' `
             'native/mod_menu_overlay/build.ps1' `
