@@ -1,0 +1,181 @@
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -798,9 +798,11 @@ struct ModItem {
+     char description[512] = {};
+     char components[256] = {};
+     char plugin[64] = {};
++    char executable[64] = {};
+     char action_label[32] = "Apply";
+     ModType type = ModType::Toggle;
+     bool enabled = true;
++    bool auto_apply = false;
+     char status[128] = "Pronto";
+     bool action_applied = false;
+     std::vector<ModOption> options;
+diff --git a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+index c1f913a..7fc9756 100644
+--- a/disgaea_extract/native/mod_menu_overlay/mod_menu_overlay.cpp
++++ b/disgaea_work/native/mod_menu_overlay/mod_menu_overlay.cpp
+@@ -810,77 +812,101 @@ static std::vector<ModItem> g_discovered_mods;
+ static int g_selected_mod = 0;
+ static bool g_mods_scanned = false;
+ 
++namespace ModLogger {
++    void Init(const char* exe_dir);
++    void Log(const char* fmt, ...);
++}
++
+ // -----------------------------------------------------------------------------
+ // Generic Standalone Mod Action Dispatcher (C++ Native / Lua Only)
+ // -----------------------------------------------------------------------------
+-void ExecuteModActionGeneric(ModItem& mod) {
++bool LaunchModActionProcess(ModItem& mod, const char* game_dir, const char* action_path, const char* action_name) {
++    STARTUPINFOA si = {};
++    si.cb = sizeof(si);
++    PROCESS_INFORMATION pi = {};
++    char command_line[MAX_PATH * 3] = {};
++
++    const char* extension = strrchr(action_path, '.');
++    if (extension != nullptr && _stricmp(extension, ".bat") == 0) {
++        std::snprintf(command_line, sizeof(command_line), "cmd.exe /d /s /c \"\"%s\"\"", action_path);
++    } else if (extension != nullptr && _stricmp(extension, ".lua") == 0) {
++        std::snprintf(command_line, sizeof(command_line), "lua \"%s\"", action_path);
++    } else {
++        std::snprintf(command_line, sizeof(command_line), "\"%s\"", action_path);
++    }
++
++    if (!CreateProcessA(nullptr, command_line, nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
++                        nullptr, game_dir, &si, &pi)) {
++        const DWORD error = GetLastError();
++        mod.action_applied = false;
++        ModLogger::Log("[ModLoader] [ACTION_ERROR] CreateProcess falhou para %s (Win32 Error: %lu)", action_path, error);
++        std::snprintf(mod.status, sizeof(mod.status), "Falha ao executar (erro %lu)", error);
++        return false;
++    }
++
++    CloseHandle(pi.hProcess);
++    CloseHandle(pi.hThread);
+     mod.action_applied = true;
+-    
+-    // 1. Check for standalone Native C++ Executable (e.g. mods/<mod_id>/APLICAR_MOD_*.exe)
+-    char search_pattern[MAX_PATH] = {};
+-    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.exe", mod.id);
+-    
+-    WIN32_FIND_DATAA fd = {};
+-    HANDLE hFind = FindFirstFileA(search_pattern, &fd);
+-    if (hFind != INVALID_HANDLE_VALUE) {
+-        char exe_path[MAX_PATH] = {};
+-        std::snprintf(exe_path, sizeof(exe_path), "mods/%s/%s", mod.id, fd.cFileName);
+-        FindClose(hFind);
+-        
+-        STARTUPINFOA si = {};
+-        si.cb = sizeof(si);
+-        PROCESS_INFORMATION pi = {};
+-        if (CreateProcessA(NULL, exe_path, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+-            CloseHandle(pi.hProcess);
+-            CloseHandle(pi.hThread);
++    ModLogger::Log("[ModLoader] [ACTION] Mod: %s -> %s", mod.name, action_path);
++    std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", action_name);
++    return true;
++}
++
++void ExecuteModActionGeneric(ModItem& mod) {
++    char game_dir[MAX_PATH] = {};
++    GetModuleFileNameA(nullptr, game_dir, MAX_PATH);
++    char* last_slash = strrchr(game_dir, '\\');
++    if (last_slash) *last_slash = '\0';
++
++    ModLogger::Init(game_dir);
++
++    const char* folder = mod.dir_name[0] != '\0' ? mod.dir_name : mod.id;
++    char action_path[MAX_PATH] = {};
++    char action_name[MAX_PATH] = {};
++
++    // Prefer an explicit action declared by mod.json. This keeps the host generic
++    // while allowing directory names and public mod ids to differ safely.
++    if (mod.executable[0] != '\0') {
++        std::snprintf(action_path, sizeof(action_path), "%s\\mods\\%s\\%s", game_dir, folder, mod.executable);
++        std::snprintf(action_name, sizeof(action_name), "%s", mod.executable);
++        const DWORD attributes = GetFileAttributesA(action_path);
++        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
++            ModLogger::Log("[ModLoader] [ACTION_ERROR] Acao declarada nao encontrada: %s", action_path);
++            mod.action_applied = false;
++            std::snprintf(mod.status, sizeof(mod.status), "Acao nao encontrada: %s", mod.executable);
++            return;
+         }
+-        std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", fd.cFileName);
++        LaunchModActionProcess(mod, game_dir, action_path, action_name);
+         return;
+     }
+ 
+-    // 2. Check for standalone Batch script (e.g. mods/<mod_id>/APLICAR_MOD_*.bat)
+-    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.bat", mod.id);
+-    hFind = FindFirstFileA(search_pattern, &fd);
+-    if (hFind != INVALID_HANDLE_VALUE) {
+-        char bat_path[MAX_PATH] = {};
+-        std::snprintf(bat_path, sizeof(bat_path), "mods/%s/%s", mod.id, fd.cFileName);
+-        FindClose(hFind);
+-        
+-        char cmd[MAX_PATH * 2] = {};
+-        std::snprintf(cmd, sizeof(cmd), "cmd.exe /c start \"\" \"%s\"", bat_path);
+-        STARTUPINFOA si = {};
+-        si.cb = sizeof(si);
+-        PROCESS_INFORMATION pi = {};
+-        if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+-            CloseHandle(pi.hProcess);
+-            CloseHandle(pi.hThread);
++    // UE4SS-style generic fallback: native EXE first, then BAT, then Lua.
++    const char* patterns[] = {
++        "APLICAR_MOD_*.exe",
++        "APLICAR_MOD_*.bat",
++        "APLICAR_MOD_*.lua"
++    };
++
++    for (const char* pattern_name : patterns) {
++        char search_pattern[MAX_PATH] = {};
++        std::snprintf(search_pattern, sizeof(search_pattern), "%s\\mods\\%s\\%s", game_dir, folder, pattern_name);
++        WIN32_FIND_DATAA fd = {};
++        HANDLE hFind = FindFirstFileA(search_pattern, &fd);
++        if (hFind == INVALID_HANDLE_VALUE) {
++            continue;
+         }
+-        std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", fd.cFileName);
+-        return;
+-    }
+-    
+-    // 3. Check for standalone Lua script (e.g. mods/<mod_id>/APLICAR_MOD_*.lua)
+-    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.lua", mod.id);
+-    hFind = FindFirstFileA(search_pattern, &fd);
+-    if (hFind != INVALID_HANDLE_VALUE) {
+-        char lua_path[MAX_PATH] = {};
+-        std::snprintf(lua_path, sizeof(lua_path), "mods/%s/%s", mod.id, fd.cFileName);
++
++        std::snprintf(action_path, sizeof(action_path), "%s\\mods\\%s\\%s", game_dir, folder, fd.cFileName);
++        std::snprintf(action_name, sizeof(action_name), "%s", fd.cFileName);
+         FindClose(hFind);
+-        
+-        char cmd[MAX_PATH * 2] = {};
+-        std::snprintf(cmd, sizeof(cmd), "lua \"%s\"", lua_path);
+-        STARTUPINFOA si = {};
+-        si.cb = sizeof(si);
+-        PROCESS_INFORMATION pi = {};
+-        if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+-            CloseHandle(pi.hProcess);
+-            CloseHandle(pi.hThread);
+-        }
+-        std::snprintf(mod.status, sizeof(mod.status), "Executado Lua: %s", fd.cFileName);
++        LaunchModActionProcess(mod, game_dir, action_path, action_name);
+         return;
+     }
+-    
+-    std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso.");
++
++    ModLogger::Log("[ModLoader] [ACTION_ERROR] Mod action sem executavel/script implementado: %s (Dir: %s, Id: %s)",
++                   mod.name, folder, mod.id);
++    mod.action_applied = false;
++    std::snprintf(mod.status, sizeof(mod.status), "Acao sem executavel/script implementado.");
+ }
+ 
+ // -----------------------------------------------------------------------------
