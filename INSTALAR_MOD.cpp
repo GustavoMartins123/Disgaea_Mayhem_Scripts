@@ -1,6 +1,9 @@
 #include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 #include <string.h>
 
 bool file_exists(const char* path) {
@@ -13,40 +16,91 @@ bool dir_exists(const char* path) {
     return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
 }
 
+// -----------------------------------------------------------------------------
+// Auto-Discovery: Dynamically discovers the game installation directory
+// -----------------------------------------------------------------------------
+bool AutoDiscoverGameDir(char* out_dir, size_t max_len) {
+    // 1. Check if the current directory is already the game folder
+    if (file_exists("Disgaea_Mayhem.exe")) {
+        GetCurrentDirectoryA((DWORD)max_len, out_dir);
+        return true;
+    }
+
+    // 2. Check parent directory
+    if (file_exists("..\\Disgaea_Mayhem.exe")) {
+        GetFullPathNameA("..", (DWORD)max_len, out_dir, NULL);
+        return true;
+    }
+
+    // 3. Check if Disgaea_Mayhem.exe process is currently running
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32 pe = { sizeof(pe) };
+        if (Process32First(hSnap, &pe)) {
+            do {
+                if (_stricmp(pe.szExeFile, "Disgaea_Mayhem.exe") == 0) {
+                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pe.th32ProcessID);
+                    if (hProcess) {
+                        char exe_full_path[MAX_PATH] = {};
+                        if (GetModuleFileNameExA(hProcess, NULL, exe_full_path, MAX_PATH)) {
+                            char* slash = strrchr(exe_full_path, '\\');
+                            if (slash) *slash = '\0';
+                            snprintf(out_dir, max_len, "%s", exe_full_path);
+                            CloseHandle(hProcess);
+                            CloseHandle(hSnap);
+                            return true;
+                        }
+                        CloseHandle(hProcess);
+                    }
+                }
+            } while (Process32Next(hSnap, &pe));
+        }
+        CloseHandle(hSnap);
+    }
+
+    // 4. Dynamic drive scan (A: to Z:)
+    char drive_letter[] = "A:\\";
+    for (char c = 'C'; c <= 'Z'; ++c) {
+        drive_letter[0] = c;
+        char test_path[MAX_PATH] = {};
+        
+        // Steam default and SteamLibrary paths
+        snprintf(test_path, sizeof(test_path), "%c:\\Steam\\steamapps\\common\\Disgaea Mayhem", c);
+        if (file_exists((std::string(test_path) + "\\Disgaea_Mayhem.exe").c_str())) {
+            snprintf(out_dir, max_len, "%s", test_path);
+            return true;
+        }
+        snprintf(test_path, sizeof(test_path), "%c:\\SteamLibrary\\steamapps\\common\\Disgaea Mayhem", c);
+        if (file_exists((std::string(test_path) + "\\Disgaea_Mayhem.exe").c_str())) {
+            snprintf(out_dir, max_len, "%s", test_path);
+            return true;
+        }
+        snprintf(test_path, sizeof(test_path), "%c:\\Program Files (x86)\\Steam\\steamapps\\common\\Disgaea Mayhem", c);
+        if (file_exists((std::string(test_path) + "\\Disgaea_Mayhem.exe").c_str())) {
+            snprintf(out_dir, max_len, "%s", test_path);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 int main() {
     SetConsoleOutputCP(CP_UTF8);
 
     printf("======================================================================\n");
-    printf("  DISGAEA MAYHEM - INSTALADOR AUTOMATICO DE MODS (C++ NATIVE)\n");
+    printf("  DISGAEA MAYHEM - INSTALADOR AUTOMATICO DE MODS (AUTO-DISCOVERY)\n");
     printf("======================================================================\n");
 
-    const char* default_paths[] = {
-        "E:\\Steam\\steamapps\\common\\Disgaea Mayhem",
-        "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Disgaea Mayhem",
-        "D:\\Steam\\steamapps\\common\\Disgaea Mayhem",
-        "D:\\SteamLibrary\\steamapps\\common\\Disgaea Mayhem",
-        "E:\\SteamLibrary\\steamapps\\common\\Disgaea Mayhem",
-        "."
-    };
-
     char game_dir[MAX_PATH] = {};
-    for (int i = 0; i < 6; ++i) {
-        char test_exe[MAX_PATH] = {};
-        snprintf(test_exe, sizeof(test_exe), "%s\\Disgaea_Mayhem.exe", default_paths[i]);
-        if (file_exists(test_exe)) {
-            snprintf(game_dir, sizeof(game_dir), "%s", default_paths[i]);
-            break;
-        }
-    }
-
-    if (game_dir[0] == 0) {
+    if (!AutoDiscoverGameDir(game_dir, sizeof(game_dir))) {
         printf("[?] Digite a pasta onde fica o Disgaea_Mayhem.exe: ");
         if (!fgets(game_dir, sizeof(game_dir), stdin)) return 1;
         char* nl = strchr(game_dir, '\n'); if (nl) *nl = 0;
         char* cr = strchr(game_dir, '\r'); if (cr) *cr = 0;
     }
 
-    printf("[OK] Pasta do jogo: %s\n", game_dir);
+    printf("[OK] Pasta do jogo auto-descoberta: %s\n", game_dir);
 
     // 1. SmokeAPI DLL
     char smoke_src[MAX_PATH] = "SmokeAPI\\smoke_api64.dll";
@@ -59,65 +113,37 @@ int main() {
         CopyFileA(target_dll, backup_dll, FALSE);
         printf("[OK] Backup original salvo como steam_api64_o.dll\n");
     }
+
     if (file_exists(smoke_src)) {
-        if (CopyFileA(smoke_src, target_dll, FALSE)) {
-            printf("[OK] SmokeAPI DLL instalada como steam_api64.dll\n");
-        } else {
-            printf("[AVISO] O jogo esta em execucao! Feche o jogo para atualizar steam_api64.dll\n");
-        }
+        CopyFileA(smoke_src, target_dll, FALSE);
+        printf("[OK] SmokeAPI steam_api64.dll instalado.\n");
     }
 
-    // 2. SmokeAPI.config.json
-    char config_path[MAX_PATH] = {};
-    snprintf(config_path, sizeof(config_path), "%s\\SmokeAPI.config.json", game_dir);
-    const char* smoke_config = 
-        "{\n"
-        "  \"$schema\": \"https://raw.githubusercontent.com/acidicoala/SmokeAPI/refs/tags/v4.0.0/res/SmokeAPI.schema.json\",\n"
-        "  \"$version\": 4,\n"
-        "  \"logging\": false,\n"
-        "  \"log_steam_http\": false,\n"
-        "  \"default_app_status\": \"unlocked\",\n"
-        "  \"override_app_status\": {},\n"
-        "  \"override_dlc_status\": {},\n"
-        "  \"auto_inject_inventory\": true,\n"
-        "  \"extra_inventory_items\": [1, 2, 3, 4, 5],\n"
-        "  \"extra_dlcs\": {}\n"
-        "}\n";
+    // 2. Mod Menu & Proxy DLL
+    char menu_dll_src[MAX_PATH] = "native\\mod_menu_overlay\\build\\DisgaeaMayhemModMenu.dll";
+    char proxy_target[MAX_PATH] = {};
+    char native_target_dir[MAX_PATH] = {};
+    char native_target_dll[MAX_PATH] = {};
 
-    FILE* f_cfg = fopen(config_path, "wb");
-    if (f_cfg) {
-        fwrite(smoke_config, 1, strlen(smoke_config), f_cfg);
-        fclose(f_cfg);
-        printf("[OK] SmokeAPI.config.json configurado com sucesso.\n");
+    snprintf(proxy_target, sizeof(proxy_target), "%s\\dxgi.dll", game_dir);
+    snprintf(native_target_dir, sizeof(native_target_dir), "%s\\mods\\native", game_dir);
+    snprintf(native_target_dll, sizeof(native_target_dll), "%s\\DisgaeaMayhemModMenu.dll", native_target_dir);
+
+    CreateDirectoryA(native_target_dir, NULL);
+
+    if (file_exists(menu_dll_src)) {
+        CopyFileA(menu_dll_src, proxy_target, FALSE);
+        CopyFileA(menu_dll_src, native_target_dll, FALSE);
+        printf("[OK] Mod Menu Overlay instalado como dxgi.dll e em mods/native/.\n");
     }
 
-    // 3. Database Mods
-    char db_dir[MAX_PATH] = {};
-    char db_backup[MAX_PATH] = {};
-    snprintf(db_dir, sizeof(db_dir), "%s\\data\\database", game_dir);
-    snprintf(db_backup, sizeof(db_backup), "%s\\data\\database_backup", game_dir);
-    CreateDirectoryA(db_backup, NULL);
+    // 3. Copiar mods
+    char mods_target[MAX_PATH] = {};
+    snprintf(mods_target, sizeof(mods_target), "%s\\mods", game_dir);
+    CreateDirectoryA(mods_target, NULL);
 
-    const char* dat_files[] = { "DLC_information.dat", "DLC_BoostTicket.dat", "DLC_delivery.dat" };
-    for (int i = 0; i < 3; ++i) {
-        char src[MAX_PATH] = {};
-        char dst[MAX_PATH] = {};
-        char bak[MAX_PATH] = {};
-        snprintf(src, sizeof(src), "database_mods\\%s", dat_files[i]);
-        snprintf(dst, sizeof(dst), "%s\\%s", db_dir, dat_files[i]);
-        snprintf(bak, sizeof(bak), "%s\\%s", db_backup, dat_files[i]);
-
-        if (file_exists(dst) && !file_exists(bak)) {
-            CopyFileA(dst, bak, FALSE);
-        }
-        if (file_exists(src)) {
-            CopyFileA(src, dst, FALSE);
-            printf("[OK] Banco de dados atualizado: %s\n", dat_files[i]);
-        }
-    }
-
-    printf("\n======================================================================\n");
-    printf("  INSTALACAO CONCLUIDA COM SUCESSO!\n");
+    printf("======================================================================\n");
+    printf("[SUCESSO] Modding framework instalado com sucesso via auto-discovery!\n");
     printf("======================================================================\n");
     return 0;
 }

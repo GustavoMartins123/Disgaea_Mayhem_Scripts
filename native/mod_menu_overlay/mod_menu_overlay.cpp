@@ -886,14 +886,19 @@ void ExecuteModActionGeneric(ModItem& mod) {
 // Generic Standalone Plugin Lifecycle Manager (Toggle & Options)
 // -----------------------------------------------------------------------------
 void NotifyModToggle(ModItem& mod) {
+    char exe_dir[MAX_PATH] = {};
+    GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
+    char* last_slash = strrchr(exe_dir, '\\');
+    if (last_slash) *last_slash = '\0';
+
     char dll_pattern[MAX_PATH] = {};
-    std::snprintf(dll_pattern, sizeof(dll_pattern), "mods/%s/*.dll", mod.id);
+    std::snprintf(dll_pattern, sizeof(dll_pattern), "%s\\mods\\%s\\*.dll", exe_dir, mod.id);
     
     WIN32_FIND_DATAA fd = {};
     HANDLE hFind = FindFirstFileA(dll_pattern, &fd);
     if (hFind != INVALID_HANDLE_VALUE) {
         char dll_path[MAX_PATH] = {};
-        std::snprintf(dll_path, sizeof(dll_path), "mods/%s/%s", mod.id, fd.cFileName);
+        std::snprintf(dll_path, sizeof(dll_path), "%s\\mods\\%s\\%s", exe_dir, mod.id, fd.cFileName);
         FindClose(hFind);
         
         HMODULE hMod = GetModuleHandleA(fd.cFileName);
@@ -928,14 +933,19 @@ void NotifyModToggle(ModItem& mod) {
 }
 
 void NotifyModOptionChanged(ModItem& mod, const ModOption& opt) {
+    char exe_dir[MAX_PATH] = {};
+    GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
+    char* last_slash = strrchr(exe_dir, '\\');
+    if (last_slash) *last_slash = '\0';
+
     char dll_pattern[MAX_PATH] = {};
-    std::snprintf(dll_pattern, sizeof(dll_pattern), "mods/%s/*.dll", mod.id);
+    std::snprintf(dll_pattern, sizeof(dll_pattern), "%s\\mods\\%s\\*.dll", exe_dir, mod.id);
     
     WIN32_FIND_DATAA fd = {};
     HANDLE hFind = FindFirstFileA(dll_pattern, &fd);
     if (hFind != INVALID_HANDLE_VALUE) {
         char dll_path[MAX_PATH] = {};
-        std::snprintf(dll_path, sizeof(dll_path), "mods/%s/%s", mod.id, fd.cFileName);
+        std::snprintf(dll_path, sizeof(dll_path), "%s\\mods\\%s\\%s", exe_dir, mod.id, fd.cFileName);
         FindClose(hFind);
         
         HMODULE hMod = GetModuleHandleA(fd.cFileName);

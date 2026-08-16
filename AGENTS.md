@@ -24,7 +24,17 @@ Nosso ecossistema segue a arquitetura modular e desacoplada inspirada no padrão
 
 ---
 
-## 🧩 2. Desacoplamento Total do Mod Menu
+## 🧭 2. Proibição de Caminhos Absolutos Hardcoded (Auto-Discovery Obrigatório)
+
+* **ESTRITAMENTE PROIBIDO:** **NUNCA** codifique caminhos absolutos de drives específicos da sua máquina (ex: `E:\Steam\...`, `C:\Disgaea\...`) dentro de arquivos `.cpp`, `.h`, `.exe`, `.dll` ou scripts.
+* **OBRIGATÓRIO:** Todos os utilitários, executáveis e DLLs devem resolver seus caminhos via **Auto-Descobrimento Dinâmico (Auto-Discovery)**:
+  1. Localizar arquivos relativos ao próprio executável (`GetModuleFileNameA(NULL, ...)`).
+  2. Localizar o executável do jogo a partir do processo em execução via Win32 API (`QueryFullProcessImageNameA` / `GetModuleFileNameExA`).
+  3. Varredura dinâmica de drives montados (`A:` a `Z:`) e pastas padrão do Steam.
+
+---
+
+## 🧩 3. Desacoplamento Total do Mod Menu
 
 * O Mod Menu ([`mod_menu_overlay.cpp`](file:///C:/Disgaea_Mayhem_Scripts/native/mod_menu_overlay/mod_menu_overlay.cpp) / `DisgaeaMayhemModMenu.dll` / `dxgi.dll`) é **apenas um host genérico de UI (Overlay DirectX 12 com Dear ImGui) e despachante**.
 * **NUNCA** adicione lógica de jogo, regras de negócio ou tratamentos específicos de mods no código-fonte do Mod Menu (`mod_menu_overlay.cpp`).
@@ -37,7 +47,7 @@ Nosso ecossistema segue a arquitetura modular e desacoplada inspirada no padrão
 
 ---
 
-## 📁 3. Estrutura Autônoma de Cada Mod (`mods/<mod_id>/`)
+## 📁 4. Estrutura Autônoma de Cada Mod (`mods/<mod_id>/`)
 
 Cada mod deve ser completamente autônomo (*standalone*), independente e auto-contido em sua pasta:
 
@@ -47,7 +57,7 @@ mods/<nome_do_mod>/
 ├── mod.json                 # Metadados, categoria, tipo (toggle/action), plugin e opcoes
 ├── README.md                # Instrucoes e documentacao tecnica especifica do mod
 ├── <nome_do_mod>.dll        # Hook/Plugin residente em memoria (se C++)
-├── APLICAR_MOD_<nome>.exe   # Utilitario standalone compilado em C++
+├── APLICAR_MOD_<nome>.exe   # Utilitario standalone compilado em C++ (com Auto-Discovery)
 ├── APLICAR_MOD_<nome>.bat   # Lancador de 1 clique
 └── Scripts/ (se Lua)        # Scripts modulares Lua
     ├── config.lua           # Valores padrao de configuracao
@@ -57,7 +67,7 @@ mods/<nome_do_mod>/
 
 ---
 
-## 🔄 4. Sincronização Obrigatória com o Repositório
+## 🔄 5. Sincronização Obrigatória com o Repositório
 
 Todas as modificações de código, scripts, documentação, metadados JSON e binários compilados **DEVEM** ser mantidas 100% sincronizadas entre:
 1. **Repositório Central:** `C:\Disgaea_Mayhem_Scripts`
@@ -65,23 +75,26 @@ Todas as modificações de código, scripts, documentação, metadados JSON e bi
 
 ---
 
-## 📚 5. Documentação de Engenharia Reversa na Pasta `docs/`
+## 📚 6. Documentação Modular de Engenharia Reversa na Pasta `docs/`
 
-Qualquer estrutura de classe, VTable, TypeDescriptor RTTI, offset de struct ou fluxo de desmontagem de `Disgaea_Mayhem.exe` descoberto durante as investigações deve ser imediatamente catalogado em:
-* [`docs/ESTRUTURA_CLASSES_REVERSA.md`](file:///C:/Disgaea_Mayhem_Scripts/docs/ESTRUTURA_CLASSES_REVERSA.md)
+Qualquer estrutura de classe, VTable, TypeDescriptor RTTI, offset de struct ou fluxo de desmontagem de `Disgaea_Mayhem.exe` descoberto deve ser catalogado de forma modular em `docs/`:
+* [`docs/ESTRUTURA_CLASSES_REVERSA.md`](file:///C:/Disgaea_Mayhem_Scripts/docs/ESTRUTURA_CLASSES_REVERSA.md) (Índice mestre consolidado)
+* [`docs/MOTOR_NGF_ARQUITETURA.md`](file:///C:/Disgaea_Mayhem_Scripts/docs/MOTOR_NGF_ARQUITETURA.md)
+* [`docs/SUBSISTEMA_ITEM_WORLD.md`](file:///C:/Disgaea_Mayhem_Scripts/docs/SUBSISTEMA_ITEM_WORLD.md)
+* [`docs/SUBSISTEMA_CHARA_WORLD.md`](file:///C:/Disgaea_Mayhem_Scripts/docs/SUBSISTEMA_CHARA_WORLD.md)
 
 ---
 
-## ⚙️ 6. Compilação e Ferramentas Nativas
+## ⚙️ 7. Compilação e Ferramentas Nativas
 
 * **Compilador C++:** MinGW GCC x64 (`C:\TDM-GCC-64\bin\g++.exe` / `gcc.exe`).
 * **Compilação de DLLs de Hook / Plugin:**
   ```powershell
-  g++ -O2 -shared -static -s item_world.cpp -o item_world.dll
+  g++ -O2 -shared -static -s chara_world.cpp -o chara_world.dll
   ```
 * **Compilação de Utilitários Standalone:**
   ```powershell
-  g++ -O2 -static -s apply_mod.cpp -o APLICAR_MOD.exe
+  g++ -O2 -static -s apply_chara_world.cpp -o APLICAR_MOD_CHARA_WORLD.exe -lpsapi
   ```
 * **Compilação do Mod Menu Overlay:**
   ```powershell

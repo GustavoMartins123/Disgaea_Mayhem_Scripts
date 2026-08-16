@@ -78,17 +78,30 @@ if ($LASTEXITCODE -ne 0) {
 $targets = [System.Collections.Generic.List[string]]::new()
 $targets.Add($gameRoot.ToString())
 
-$steamGamePaths = @(
-    'E:\Steam\steamapps\common\Disgaea Mayhem',
-    'C:\Program Files (x86)\Steam\steamapps\common\Disgaea Mayhem',
-    'D:\Steam\steamapps\common\Disgaea Mayhem',
-    'D:\SteamLibrary\steamapps\common\Disgaea Mayhem',
-    'E:\SteamLibrary\steamapps\common\Disgaea Mayhem'
-)
+# Auto-discover from running process
+$proc = Get-Process -Name "Disgaea_Mayhem" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($proc) {
+    try {
+        $procDir = Split-Path -Parent $proc.Path
+        if ((Test-Path (Join-Path $procDir 'Disgaea_Mayhem.exe')) -and ($targets -notcontains $procDir)) {
+            $targets.Add($procDir)
+        }
+    } catch {}
+}
 
-foreach ($p in $steamGamePaths) {
-    if ((Test-Path (Join-Path $p 'Disgaea_Mayhem.exe')) -and ($p -ne $gameRoot.ToString())) {
-        $targets.Add($p)
+# Auto-discover from all mounted drives (C:, D:, E:, F:, G:, etc.)
+$drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+foreach ($drive in $drives) {
+    $candidates = @(
+        (Join-Path $drive 'Steam\steamapps\common\Disgaea Mayhem'),
+        (Join-Path $drive 'SteamLibrary\steamapps\common\Disgaea Mayhem'),
+        (Join-Path $drive 'Program Files (x86)\Steam\steamapps\common\Disgaea Mayhem'),
+        (Join-Path $drive 'Games\Disgaea Mayhem')
+    )
+    foreach ($c in $candidates) {
+        if ((Test-Path (Join-Path $c 'Disgaea_Mayhem.exe')) -and ($targets -notcontains $c)) {
+            $targets.Add($c)
+        }
     }
 }
 
