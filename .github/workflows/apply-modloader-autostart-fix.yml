@@ -27,26 +27,40 @@ jobs:
           New-Item -ItemType Directory -Force $patchDir | Out-Null
           Copy-Item '.github\patches\*.patch' $patchDir
 
+          # The patches are LF because they were generated from the repository blobs.
+          # actions/checkout on Windows can materialize CRLF, so normalize both the
+          # patch files and their text targets before invoking git apply.
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
           Get-ChildItem $patchDir -Filter '*.patch' | ForEach-Object {
-            $text = [System.IO.File]::ReadAllText($_.FullName)
-            if (-not $text.EndsWith("`n")) {
-              [System.IO.File]::AppendAllText($_.FullName, "`n", [System.Text.UTF8Encoding]::new($false))
-            }
+            $text = [System.IO.File]::ReadAllText($_.FullName).Replace("`r`n", "`n")
+            if (-not $text.EndsWith("`n")) { $text += "`n" }
+            [System.IO.File]::WriteAllText($_.FullName, $text, $utf8NoBom)
           }
 
+          git config core.autocrlf false
           git fetch origin main
           git checkout -B modloader-publish origin/main
 
-          Get-ChildItem $patchDir -Filter '*.patch' |
-            Where-Object { $_.Name -ne '00-installer.patch' } |
-            Sort-Object Name |
-            ForEach-Object {
-              Write-Host "Applying $($_.Name)"
-              git apply -p2 --check $_.FullName
-              if ($LASTEXITCODE -ne 0) { throw "Patch check failed: $($_.Name)" }
-              git apply -p2 $_.FullName
-              if ($LASTEXITCODE -ne 0) { throw "Patch apply failed: $($_.Name)" }
-            }
+          $targets = @(
+            'INSTALAR_MOD.cpp',
+            'mods\cheat_shop\mod.json',
+            'mods\dark_assembly\mod.json',
+            'mods\dlc_unlocker\mod.json',
+            'native\mod_menu_overlay\build.ps1',
+            'native\mod_menu_overlay\mod_menu_overlay.cpp'
+          )
+          foreach ($target in $targets) {
+            $text = [System.IO.File]::ReadAllText($target).Replace("`r`n", "`n")
+            [System.IO.File]::WriteAllText($target, $text, $utf8NoBom)
+          }
+
+          Get-ChildItem $patchDir -Filter '*.patch' | Sort-Object Name | ForEach-Object {
+            Write-Host "Applying $($_.Name)"
+            git apply -p2 --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Patch check failed: $($_.Name)" }
+            git apply -p2 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Patch apply failed: $($_.Name)" }
+          }
 
           Copy-Item 'database_mods\cheatSetting.dat' 'mods\cheat_shop\cheatSetting.dat' -Force
           Copy-Item 'database_mods\wish.dat' 'mods\dark_assembly\wish.dat' -Force
@@ -108,7 +122,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
           git add -- `
-            'INSTALAR_MOD.exe' 'dxgi.dll' `
+            'INSTALAR_MOD.cpp' 'INSTALAR_MOD.exe' 'dxgi.dll' `
             'mods/cheat_shop' 'mods/dark_assembly' 'mods/dlc_unlocker/mod.json' `
             'mods/native/DisgaeaMayhemModMenu.dll' `
             'native/mod_menu_overlay/build.ps1' `
