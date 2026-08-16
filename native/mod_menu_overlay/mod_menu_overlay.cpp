@@ -993,14 +993,20 @@ void NotifyModToggle(ModItem& mod) {
         if (hMod) {
             typedef void (*pfn_Mod_Enable)();
             typedef void (*pfn_Mod_Disable)();
+            typedef void* (*pfn_start_mod)();
+            typedef void (*pfn_uninstall_mod)(void*);
             typedef void (*pfn_Mod_SetOption)(const char*, int, bool);
             
             pfn_Mod_Enable fn_enable = (pfn_Mod_Enable)(void*)GetProcAddress(hMod, "Mod_Enable");
+            pfn_start_mod fn_start = (pfn_start_mod)(void*)GetProcAddress(hMod, "start_mod");
             pfn_Mod_Disable fn_disable = (pfn_Mod_Disable)(void*)GetProcAddress(hMod, "Mod_Disable");
+            pfn_uninstall_mod fn_uninstall = (pfn_uninstall_mod)(void*)GetProcAddress(hMod, "uninstall_mod");
             pfn_Mod_SetOption fn_set_opt = (pfn_Mod_SetOption)(void*)GetProcAddress(hMod, "Mod_SetOption");
             
             if (mod.enabled) {
                 if (fn_enable) fn_enable();
+                else if (fn_start) fn_start();
+
                 if (fn_set_opt) {
                     for (auto& opt : mod.options) {
                         fn_set_opt(opt.id, opt.int_val, opt.bool_val);
@@ -1010,6 +1016,8 @@ void NotifyModToggle(ModItem& mod) {
                 std::snprintf(mod.status, sizeof(mod.status), "Hook residente ATIVADO (ON) na memoria.");
             } else {
                 if (fn_disable) fn_disable();
+                else if (fn_uninstall) fn_uninstall(nullptr);
+
                 ModLogger::Log("[ModLoader] [DISABLE] Mod: %s DESATIVADO (OFF)", mod.name);
                 std::snprintf(mod.status, sizeof(mod.status), "Hook residente DESATIVADO (OFF).");
             }

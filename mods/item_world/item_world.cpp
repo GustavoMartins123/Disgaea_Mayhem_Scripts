@@ -148,6 +148,16 @@ extern "C" {
         g_mod_enabled = false;
     }
 
+    // UE4SS-Style lifecycle bindings
+    __declspec(dllexport) void* start_mod() {
+        Mod_Enable();
+        return (void*)1;
+    }
+
+    __declspec(dllexport) void uninstall_mod(void*) {
+        Mod_Disable();
+    }
+
     __declspec(dllexport) void Mod_SetOption(const char* key, int int_val, bool bool_val) {
         if (!key) return;
         if (strcmp(key, "levels_per_floor") == 0) {
