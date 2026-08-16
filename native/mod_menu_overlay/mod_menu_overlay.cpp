@@ -891,6 +891,16 @@ void NotifyModToggle(ModItem& mod) {
     char* last_slash = strrchr(exe_dir, '\\');
     if (last_slash) *last_slash = '\0';
 
+    // 1. Sync enabled.txt on disk
+    char enabled_path[MAX_PATH] = {};
+    std::snprintf(enabled_path, sizeof(enabled_path), "%s\\mods\\%s\\enabled.txt", exe_dir, mod.id);
+    FILE* f_enabled = fopen(enabled_path, "w");
+    if (f_enabled) {
+        fputc(mod.enabled ? '1' : '0', f_enabled);
+        fclose(f_enabled);
+    }
+
+    // 2. Dispatch to resident plugin DLL
     char dll_pattern[MAX_PATH] = {};
     std::snprintf(dll_pattern, sizeof(dll_pattern), "%s\\mods\\%s\\*.dll", exe_dir, mod.id);
     
