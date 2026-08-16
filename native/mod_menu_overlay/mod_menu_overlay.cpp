@@ -288,16 +288,19 @@ bool IsWritableAddress(void* address, std::size_t size) {
 
 bool SetMainMenuInputEnabled() {
     if (g_shared == nullptr || g_shared->main_menu == 0) {
-        SetFailure(1001, "Main Menu pointer was not captured");
-        return false;
+        return true;
     }
-    auto* input = reinterpret_cast<volatile std::uint8_t*>(
-        static_cast<std::uintptr_t>(g_shared->main_menu) + MAIN_MENU_INPUT_OFFSET);
-    if (!IsWritableAddress(const_cast<std::uint8_t*>(input), sizeof(*input))) {
-        SetFailure(1002, "Main Menu input address is not writable");
-        return false;
+    const uintptr_t main_menu_ptr = static_cast<uintptr_t>(g_shared->main_menu);
+    if (!IsWritableAddress(reinterpret_cast<void*>(main_menu_ptr), 0x240)) {
+        g_shared->main_menu = 0;
+        return true;
     }
+    
+    // Re-enable input flag in Main Menu object
+    auto* input = reinterpret_cast<volatile std::uint8_t*>(main_menu_ptr + MAIN_MENU_INPUT_OFFSET);
     *input = MAIN_MENU_INPUT_ENABLED;
+
+    g_shared->main_menu = 0;
     return true;
 }
 
@@ -339,6 +342,37 @@ bool ControllerBDown() {
 bool EscapeDown() {
     return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
 }
+bool ModMenuHotkeyKeyboardPressed() {
+    static bool was_pressed = false;
+    bool is_pressed = (GetAsyncKeyState(VK_F1) & 0x8000) != 0 ||
+                      (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0 ||
+                      (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+    bool triggered = is_pressed && !was_pressed;
+    was_pressed = is_pressed;
+    return triggered;
+}
+
+bool ModMenuHotkeyGamepadPressed() {
+    static bool was_pressed = false;
+    bool is_pressed = false;
+    for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
+        XINPUT_STATE state = {};
+        if (SafeXInputGetState(index, &state) == ERROR_SUCCESS) {
+            WORD b = state.Gamepad.wButtons;
+            // L3 + R3 (both thumbsticks clicked) OR Select / Back button
+            if ((((b & XINPUT_GAMEPAD_LEFT_THUMB) != 0) && ((b & XINPUT_GAMEPAD_RIGHT_THUMB) != 0)) ||
+                ((b & XINPUT_GAMEPAD_BACK) != 0)) {
+                is_pressed = true;
+                break;
+            }
+        }
+    }
+    bool triggered = is_pressed && !was_pressed;
+    was_pressed = is_pressed;
+    return triggered;
+}
+
+
 
 void AllocateSrvDescriptor(
     ImGui_ImplDX12_InitInfo*,
@@ -713,7 +747,10 @@ void UpdateOverlayState() {
     if (g_shared != nullptr && g_shared->open_request != 0) {
         g_shared->open_request = 0;
         g_overlay_visible = true;
-        g_waiting_for_back_release = false;
+    }
+
+    if (ModMenuHotkeyKeyboardPressed() || ModMenuHotkeyGamepadPressed()) {
+        g_overlay_visible = !g_overlay_visible;
     }
 
     const bool b_down = ControllerBDown();
@@ -721,12 +758,6 @@ void UpdateOverlayState() {
     if (g_overlay_visible &&
         ((b_down && !g_last_b_down) || (escape_down && !g_last_escape_down))) {
         g_overlay_visible = false;
-        g_waiting_for_back_release = true;
-    }
-    if (g_waiting_for_back_release && !b_down && !escape_down) {
-        if (SetMainMenuInputEnabled()) {
-            g_waiting_for_back_release = false;
-        }
     }
     g_last_b_down = b_down;
     g_last_escape_down = escape_down;
@@ -1529,34 +1560,38 @@ void BuildOverlay(const ImVec2& display_size) {
     }
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("🎮 LB / RB:");
+    ImGui::TextUnformatted("🎮 Atalho: Select / L3+R3 / F1");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Trocar Painel |");
+    ImGui::TextUnformatted("| LB / RB:");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("D-Pad/Stick:");
+    ImGui::TextUnformatted("Painel");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Navegar |");
+    ImGui::TextUnformatted("| D-Pad:");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("◄ / ►:");
+    ImGui::TextUnformatted("Navegar");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Sliders |");
+    ImGui::TextUnformatted("| ◄ / ►:");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("A:");
+    ImGui::TextUnformatted("Sliders");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Confirmar |");
+    ImGui::TextUnformatted("| A:");
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("B / Esc:");
+    ImGui::TextUnformatted("Confirmar");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::TextUnformatted("Voltar ao Jogo");
+    ImGui::TextUnformatted("|");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("✕ Voltar ao Jogo (B / Esc)")) {
+        g_overlay_visible = false;
+    }
     ImGui::End();
 }
 
@@ -1856,80 +1891,7 @@ void RemoveHooks() {
     MH_Uninitialize();
 }
 
-bool ApplyGamePatches(HMODULE game_exe) {
-    const uintptr_t base = reinterpret_cast<uintptr_t>(game_exe);
 
-    // Verify signatures before patching
-    const uint8_t expected_p1[] = { 0x0F, 0x84, 0x49, 0x04, 0x00, 0x00 };
-    const uint8_t expected_p2[] = { 0x0F, 0x84, 0xC3, 0x02, 0x00, 0x00 };
-    const uint8_t expected_p3[] = { 0x03 };
-    const uint8_t expected_disp[] = {
-        0x48, 0x8D, 0x8F, 0x00, 0x02, 0x00, 0x00,
-        0x48, 0x8D, 0x05, 0xF0, 0x51, 0x77, 0x00
-    };
-
-    if (std::memcmp(reinterpret_cast<void*>(base + 0x006FD501), expected_p1, sizeof(expected_p1)) != 0 ||
-        std::memcmp(reinterpret_cast<void*>(base + 0x002B8A21), expected_p2, sizeof(expected_p2)) != 0 ||
-        std::memcmp(reinterpret_cast<void*>(base + 0x002B907D), expected_p3, sizeof(expected_p3)) != 0 ||
-        std::memcmp(reinterpret_cast<void*>(base + 0x002B9582), expected_disp, sizeof(expected_disp)) != 0) {
-        SetFailure(1801, "Signatures in game executable did not match (patches skipped)");
-        return false;
-    }
-
-    // Allocate hook stub (PAGE_EXECUTE_READWRITE)
-    g_hook_stub = VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (g_hook_stub == nullptr) {
-        SetFailure(1802, "Could not allocate executable hook stub");
-        return false;
-    }
-    uint8_t* stub = static_cast<uint8_t*>(g_hook_stub);
-
-    // Build 37-byte hook code
-    uint8_t hook[37] = {};
-    hook[0] = 0x48; hook[1] = 0xB8;  // mov rax, &g_shared
-    *reinterpret_cast<uint64_t*>(&hook[2]) = reinterpret_cast<uint64_t>(g_shared);
-    hook[10] = 0x48; hook[11] = 0x89; hook[12] = 0x78; hook[13] = 0x08;  // mov [rax+8], rdi (Main Menu)
-    hook[14] = 0xC6; hook[15] = 0x87; hook[16] = 0x20; hook[17] = 0x02; hook[18] = 0x00; hook[19] = 0x00; hook[20] = 0x00;  // mov byte ptr [rdi+220h], 0
-    hook[21] = 0xC6; hook[22] = 0x00; hook[23] = 0x01;  // mov byte ptr [rax], 1 (open_request = 1)
-    hook[24] = 0x49; hook[25] = 0xBA;  // mov r10, resume_address (base + 0x002B95B9)
-    *reinterpret_cast<uint64_t*>(&hook[26]) = static_cast<uint64_t>(base + 0x002B95B9);
-    hook[34] = 0x41; hook[35] = 0xFF; hook[36] = 0xE2;  // jmp r10
-
-    std::memcpy(stub, hook, sizeof(hook));
-    FlushInstructionCache(GetCurrentProcess(), stub, sizeof(hook));
-
-    // Build 14-byte dispatcher jump
-    uint8_t jump[14] = {};
-    jump[0] = 0x48; jump[1] = 0xB8;  // mov rax, stub
-    *reinterpret_cast<uint64_t*>(&jump[2]) = reinterpret_cast<uint64_t>(stub);
-    jump[10] = 0xFF; jump[11] = 0xE0;  // jmp rax
-    jump[12] = 0x90; jump[13] = 0x90;  // nop nop
-
-    const uint8_t nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-    const uint8_t nav4[1] = { 0x04 };
-
-    auto PatchBytes = [](uintptr_t address, const void* data, size_t size) -> bool {
-        DWORD old_protect = 0;
-        if (!VirtualProtect(reinterpret_cast<void*>(address), size, PAGE_EXECUTE_READWRITE, &old_protect)) {
-            return false;
-        }
-        std::memcpy(reinterpret_cast<void*>(address), data, size);
-        DWORD ignored = 0;
-        VirtualProtect(reinterpret_cast<void*>(address), size, old_protect, &ignored);
-        FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(address), size);
-        return true;
-    };
-
-    if (!PatchBytes(base + 0x006FD501, nop6, sizeof(nop6)) ||
-        !PatchBytes(base + 0x002B8A21, nop6, sizeof(nop6)) ||
-        !PatchBytes(base + 0x002B907D, nav4, sizeof(nav4)) ||
-        !PatchBytes(base + 0x002B9582, jump, sizeof(jump))) {
-        SetFailure(1803, "Failed to apply in-memory patches");
-        return false;
-    }
-
-    return true;
-}
 
 DWORD WINAPI AutoInitThread(LPVOID) {
     Sleep(50);
@@ -1939,20 +1901,12 @@ DWORD WINAPI AutoInitThread(LPVOID) {
         return 0;
     }
 
-    wchar_t exe_path[MAX_PATH] = {};
-    GetModuleFileNameW(game_exe, exe_path, MAX_PATH);
-
     g_shared = &g_embedded_shared;
     InterlockedExchange(&g_shared->status, STATUS_WAITING);
     InterlockedExchange(&g_shared->error_code, 0);
     g_shared->error_message[0] = '\0';
 
-    // If inside Disgaea Mayhem executable, install memory patches
-    if (wcsstr(exe_path, L"Disgaea_Mayhem.exe") != nullptr) {
-        ApplyGamePatches(game_exe);
-    }
-
-    // Install DirectX 12 hooks
+    // Install DirectX 12 hooks (pure overlay without modifying game bytecode)
     if (CreateHooks()) {
         SetStatus(STATUS_HOOKS_INSTALLED);
     }
