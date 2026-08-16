@@ -1,10 +1,10 @@
 #include <windows.h>
+#include <tlhelp32.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
+#include <vector>
 
 // -----------------------------------------------------------------------------
 // Global Chara World Mod State
@@ -15,12 +15,9 @@ static volatile bool g_freeze_energy = true;
 static HANDLE g_monitor_thread = NULL;
 static volatile bool g_thread_running = false;
 
-// Dynamic Base & Cached object pointers
-static uintptr_t g_exe_base = 0;
-static uintptr_t g_vtable_cw_info = 0;
-static uintptr_t g_vtable_cw_energy_ui = 0;
-static volatile uintptr_t g_cached_cw_info = 0;
-static volatile uintptr_t g_cached_cw_ui = 0;
+// Dynamic cached pointers to active energy addresses
+static std::vector<uintptr_t> g_active_energy_addrs;
+static CRITICAL_SECTION g_cs;
 
 // -----------------------------------------------------------------------------
 // Read enabled.txt from mod directory
@@ -46,7 +43,7 @@ static bool CheckEnabledTxt() {
 }
 
 // -----------------------------------------------------------------------------
-// Safe Memory Access
+// Safe Memory Access Helpers
 // -----------------------------------------------------------------------------
 static inline bool IsValidMemoryRange(uintptr_t addr, size_t size, DWORD required_protect) {
     if (addr < 0x10000 || addr > 0x7FFFFFFEFFFF) return false;
@@ -65,79 +62,84 @@ static inline bool IsValidMemoryRange(uintptr_t addr, size_t size, DWORD require
     return false;
 }
 
-static inline bool SafeWrite32(uintptr_t addr, int32_t val) {
-    if (IsValidMemoryRange(addr, sizeof(int32_t), PAGE_READWRITE)) {
-        *(int32_t*)addr = val;
-        return true;
+// -----------------------------------------------------------------------------
+// Fast In-Process Energy Scanner & Continuous Freezing Engine
+// -----------------------------------------------------------------------------
+static void ScanAndFreezeAllEnergyBlocks() {
+    SYSTEM_INFO si = {};
+    GetSystemInfo(&si);
+
+    uintptr_t curr = 0x10000;
+    uintptr_t max_addr = (uintptr_t)si.lpMaximumApplicationAddress;
+    MEMORY_BASIC_INFORMATION mbi = {};
+
+    std::vector<uintptr_t> found;
+
+    while (curr < max_addr && VirtualQuery((LPCVOID)curr, &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_COMMIT && 
+            (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE) && 
+            !(mbi.Protect & PAGE_GUARD)) {
+            
+            uint8_t* base = (uint8_t*)mbi.BaseAddress;
+            size_t size = mbi.RegionSize;
+
+            for (size_t i = 0; i + 16 <= size; i += 4) {
+                int32_t* p = (int32_t*)(base + i);
+                // Match Chara World Energy signature:
+                // p[0] = current_energy (1..100)
+                // p[1] = max_energy (100)
+                // p[2] == 0
+                if (p[1] == 100 && p[0] >= 0 && p[0] <= 100 && p[2] == 0) {
+                    uintptr_t addr = (uintptr_t)p;
+                    *p = g_target_energy;
+                    found.push_back(addr);
+                }
+            }
+        }
+        curr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
     }
-    return false;
+
+    EnterCriticalSection(&g_cs);
+    g_active_energy_addrs = found;
+    LeaveCriticalSection(&g_cs);
 }
 
-static inline bool SafeReadPtr(uintptr_t addr, uintptr_t* out_val) {
-    if (IsValidMemoryRange(addr, sizeof(uintptr_t), PAGE_READONLY)) {
-        *out_val = *(uintptr_t*)addr;
-        return true;
-    }
-    return false;
-}
-
-// -----------------------------------------------------------------------------
-// Direct Engine Hooks via MinHook
-// -----------------------------------------------------------------------------
-typedef void* (*pfn_CWInfo_Alloc)(void* a1);
-static pfn_CWInfo_Alloc o_CWInfo_Alloc = nullptr;
-
-static void* Hook_CWInfo_Alloc(void* a1) {
-    void* result = o_CWInfo_Alloc(a1);
-    if (result && g_mod_enabled) {
-        g_cached_cw_info = (uintptr_t)result;
-        SafeWrite32((uintptr_t)result + 0x174, g_target_energy);
-        SafeWrite32((uintptr_t)result + 0x178, g_target_energy);
-    }
-    return result;
-}
-
-// -----------------------------------------------------------------------------
-// Lightweight Deterministic Energy Maintainer
-// -----------------------------------------------------------------------------
 static DWORD WINAPI CharaWorldMonitorThread(LPVOID lpParam) {
     g_thread_running = true;
 
-    int tick_count = 0;
+    int tick = 0;
 
     while (g_thread_running) {
-        if (++tick_count % 20 == 0) {
+        if (++tick % 20 == 0) {
             if (!CheckEnabledTxt()) {
                 g_mod_enabled = false;
             }
         }
 
         if (g_mod_enabled && g_freeze_energy) {
-            // 1. Maintain Logic Energy in CCharacterWorldInformation
-            if (g_cached_cw_info) {
-                uintptr_t vptr = 0;
-                if (SafeReadPtr(g_cached_cw_info, &vptr) && vptr == g_vtable_cw_info) {
-                    SafeWrite32(g_cached_cw_info + 0x174, g_target_energy);
-                    SafeWrite32(g_cached_cw_info + 0x178, g_target_energy);
-                } else {
-                    g_cached_cw_info = 0;
+            // 1. Fast path: Maintain all cached energy addresses
+            EnterCriticalSection(&g_cs);
+            bool has_valid_cache = false;
+            for (uintptr_t addr : g_active_energy_addrs) {
+                if (IsValidMemoryRange(addr, 16, PAGE_READWRITE)) {
+                    int32_t* p = (int32_t*)addr;
+                    if (p[1] == 100) {
+                        if (*p != g_target_energy) {
+                            *p = g_target_energy;
+                        }
+                        has_valid_cache = true;
+                    }
                 }
             }
+            LeaveCriticalSection(&g_cs);
 
-            // 2. Maintain UI Display in CUIUnion_CharacterWorld_Energy
-            if (g_cached_cw_ui) {
-                uintptr_t vptr = 0;
-                if (SafeReadPtr(g_cached_cw_ui, &vptr) && vptr == g_vtable_cw_energy_ui) {
-                    SafeWrite32(g_cached_cw_ui + 0x70, g_target_energy);
-                    SafeWrite32(g_cached_cw_ui + 0x78, g_target_energy);
-                    SafeWrite32(g_cached_cw_ui + 0x7C, g_target_energy);
-                    SafeWrite32(g_cached_cw_ui + 0x80, g_target_energy);
-                } else {
-                    g_cached_cw_ui = 0;
-                }
+            // 2. Periodic sweep every 500ms or if cache is empty
+            if (!has_valid_cache || (tick % 10 == 0)) {
+                ScanAndFreezeAllEnergyBlocks();
             }
         }
-        Sleep(100);
+
+        Sleep(50);
     }
 
     return 0;
@@ -156,8 +158,9 @@ extern "C" {
 
     __declspec(dllexport) void Mod_Disable() {
         g_mod_enabled = false;
-        g_cached_cw_info = 0;
-        g_cached_cw_ui = 0;
+        EnterCriticalSection(&g_cs);
+        g_active_energy_addrs.clear();
+        LeaveCriticalSection(&g_cs);
     }
 
     __declspec(dllexport) void* start_mod() {
@@ -190,19 +193,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch (fdwReason) {
         case DLL_PROCESS_ATTACH: {
             DisableThreadLibraryCalls(hinstDLL);
-            
-            g_exe_base = (uintptr_t)GetModuleHandleA(NULL);
-            if (!g_exe_base) g_exe_base = 0x140000000;
-
-            g_vtable_cw_info = g_exe_base + 0xA57610;
-            g_vtable_cw_energy_ui = g_exe_base + 0xA71728;
-
-            // Safe MinHook initialization
-            if (MH_Initialize() == MH_OK) {
-                void* target_alloc = (void*)(g_exe_base + 0x4DEF80);
-                MH_CreateHook(target_alloc, (LPVOID)&Hook_CWInfo_Alloc, reinterpret_cast<LPVOID*>(&o_CWInfo_Alloc));
-                MH_EnableHook(target_alloc);
-            }
+            InitializeCriticalSection(&g_cs);
 
             if (CheckEnabledTxt()) {
                 Mod_Enable();
@@ -214,13 +205,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         case DLL_PROCESS_DETACH:
             g_thread_running = false;
             g_mod_enabled = false;
-            MH_DisableHook(MH_ALL_HOOKS);
-            MH_Uninitialize();
             if (g_monitor_thread) {
                 WaitForSingleObject(g_monitor_thread, 200);
                 CloseHandle(g_monitor_thread);
                 g_monitor_thread = NULL;
             }
+            DeleteCriticalSection(&g_cs);
             break;
     }
     return TRUE;

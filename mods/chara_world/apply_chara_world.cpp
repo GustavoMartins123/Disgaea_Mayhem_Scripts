@@ -3,188 +3,117 @@
 #include <psapi.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <stdint.h>
+#include <vector>
 
-// -----------------------------------------------------------------------------
-// Auto-Discovery: Dynamically locates the target DLL across runtime paths
-// -----------------------------------------------------------------------------
-static bool AutoDiscoverDllPath(DWORD pid, const char* mod_name, const char* dll_name, char* out_path, size_t max_len) {
-    char self_path[MAX_PATH] = {};
-    GetModuleFileNameA(NULL, self_path, MAX_PATH);
-    char* last_slash = strrchr(self_path, '\\');
-    if (last_slash) *last_slash = '\0';
-
-    snprintf(out_path, max_len, "%s\\%s", self_path, dll_name);
-    if (GetFileAttributesA(out_path) != INVALID_FILE_ATTRIBUTES) {
-        return true;
-    }
-
-    snprintf(out_path, max_len, "%s\\mods\\%s\\%s", self_path, mod_name, dll_name);
-    if (GetFileAttributesA(out_path) != INVALID_FILE_ATTRIBUTES) {
-        return true;
-    }
-
-    if (pid != 0) {
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
-        if (hProcess) {
-            char game_exe_path[MAX_PATH] = {};
-            if (GetModuleFileNameExA(hProcess, NULL, game_exe_path, MAX_PATH)) {
-                char* game_slash = strrchr(game_exe_path, '\\');
-                if (game_slash) *game_slash = '\0';
-
-                snprintf(out_path, max_len, "%s\\mods\\%s\\%s", game_exe_path, mod_name, dll_name);
-                if (GetFileAttributesA(out_path) != INVALID_FILE_ATTRIBUTES) {
-                    CloseHandle(hProcess);
-                    return true;
+DWORD GetGamePID() {
+    DWORD pid = 0;
+    PROCESSENTRY32W pe = { sizeof(pe) };
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                if (_wcsicmp(pe.szExeFile, L"Disgaea_Mayhem.exe") == 0) {
+                    pid = pe.th32ProcessID;
+                    break;
                 }
-            }
-            CloseHandle(hProcess);
+            } while (Process32NextW(snap, &pe));
         }
+        CloseHandle(snap);
     }
-
-    return false;
+    return pid;
 }
 
 int main(int argc, char* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
-
-    bool disable_mode = false;
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--disable") == 0 || strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "off") == 0) {
-            disable_mode = true;
-        }
-    }
-
     printf("=================================================================\n");
-    printf("  DISGAEA MAYHEM - CHARA WORLD HOOK CONTROLLER\n");
-    printf("=================================================================\n");
+    printf("  Disgaea Mayhem - Chara World Energia Infinita (Travar em 100)\n");
+    printf("=================================================================\n\n");
 
-    // 1. Sync enabled.txt locally
-    char self_path[MAX_PATH] = {};
-    GetModuleFileNameA(NULL, self_path, MAX_PATH);
-    char* last_slash = strrchr(self_path, '\\');
-    if (last_slash) *last_slash = '\0';
-
-    char enabled_path[MAX_PATH] = {};
-    snprintf(enabled_path, sizeof(enabled_path), "%s\\enabled.txt", self_path);
-    FILE* f_enabled = fopen(enabled_path, "w");
-    if (f_enabled) {
-        fputc(disable_mode ? '0' : '1', f_enabled);
-        fclose(f_enabled);
-    }
-
-    // 2. Detect game process
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap == INVALID_HANDLE_VALUE) return 1;
-
-    PROCESSENTRY32 pe = { sizeof(pe) };
-    DWORD pid = 0;
-    if (Process32First(hSnap, &pe)) {
-        do {
-            if (_stricmp(pe.szExeFile, "Disgaea_Mayhem.exe") == 0) {
-                pid = pe.th32ProcessID;
-                break;
-            }
-        } while (Process32Next(hSnap, &pe));
-    }
-    CloseHandle(hSnap);
-
+    DWORD pid = GetGamePID();
     if (!pid) {
-        printf("[INFO] Jogo nao esta aberto. Flag enabled.txt atualizada para %s.\n",
-            disable_mode ? "0 (OFF)" : "1 (ON)");
-        printf("=================================================================\n");
-        return 0;
-    }
-
-    printf("[OK] Processo detectado (PID: %lu)\n", pid);
-
-    char dll_full_path[MAX_PATH] = {};
-    if (!AutoDiscoverDllPath(pid, "chara_world", "chara_world.dll", dll_full_path, sizeof(dll_full_path))) {
-        printf("[ERRO] chara_world.dll nao encontrada.\n");
+        printf("[ERRO] Disgaea_Mayhem.exe nao esta em execucao!\n");
+        printf("Inicie o jogo antes de executar este utilitario.\n");
+        system("pause");
         return 1;
     }
 
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    if (!hProcess) {
-        printf("[ERRO] Falha ao abrir o processo do jogo.\n");
+    HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProc) {
+        printf("[ERRO] Nao foi possivel abrir o processo (PID %lu). Execute como Administrador.\n", pid);
+        system("pause");
         return 1;
     }
 
-    // Check if chara_world.dll is loaded in the game
-    HMODULE hMods[1024];
-    DWORD cbNeeded = 0;
-    HMODULE hTargetMod = NULL;
+    printf("[OK] Processo encontrado (PID %lu). Varrendo memoria...\n", pid);
 
-    if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
-        for (unsigned int i = 0; i < (cbNeeded / sizeof(HMODULE)); ++i) {
-            char szModName[MAX_PATH] = {};
-            if (GetModuleBaseNameA(hProcess, hMods[i], szModName, sizeof(szModName))) {
-                if (_stricmp(szModName, "chara_world.dll") == 0) {
-                    hTargetMod = hMods[i];
-                    break;
+    SYSTEM_INFO si = {};
+    GetSystemInfo(&si);
+
+    uintptr_t curr = 0x10000;
+    uintptr_t max_addr = (uintptr_t)si.lpMaximumApplicationAddress;
+    MEMORY_BASIC_INFORMATION mbi = {};
+
+    std::vector<uintptr_t> energy_addrs;
+
+    while (curr < max_addr && VirtualQueryEx(hProc, (LPCVOID)curr, &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_READWRITE) && !(mbi.Protect & PAGE_GUARD)) {
+            std::vector<uint8_t> buffer(mbi.RegionSize);
+            SIZE_T bytesRead = 0;
+            if (ReadProcessMemory(hProc, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead) && bytesRead >= 16) {
+                for (size_t i = 0; i + 16 <= bytesRead; i += 4) {
+                    int32_t* p = (int32_t*)(buffer.data() + i);
+                    if (p[1] == 100 && p[0] >= 0 && p[0] <= 100 && p[2] == 0) {
+                        uintptr_t addr = (uintptr_t)mbi.BaseAddress + i;
+                        int32_t val = 100;
+                        if (WriteProcessMemory(hProc, (LPVOID)addr, &val, 4, NULL)) {
+                            energy_addrs.push_back(addr);
+                        }
+                    }
                 }
             }
         }
+        curr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
     }
 
-    if (disable_mode) {
-        if (hTargetMod) {
-            // Get offset of Mod_Disable
-            HMODULE hLocalMod = LoadLibraryA(dll_full_path);
-            if (hLocalMod) {
-                FARPROC pfnLocal = GetProcAddress(hLocalMod, "Mod_Disable");
-                uintptr_t offset = (uintptr_t)pfnLocal - (uintptr_t)hLocalMod;
-                LPTHREAD_START_ROUTINE pfnRemote = (LPTHREAD_START_ROUTINE)((uintptr_t)hTargetMod + offset);
+    printf("[SUCESSO] %zu blocos de energia do Chara World identificados e travados em 100!\n", energy_addrs.size());
 
-                HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, pfnRemote, NULL, 0, NULL);
-                if (hThread) {
-                    WaitForSingleObject(hThread, 2000);
-                    CloseHandle(hThread);
-                    printf("[SUCESSO] Mod Chara World DESATIVADO (OFF) com sucesso na memoria do jogo!\n");
-                }
-                FreeLibrary(hLocalMod);
-            }
-        } else {
-            printf("[OK] Mod ja esta desativado (nao carregado no jogo).\n");
+    // Se iniciado manualmente, entra em modo guardiao continuo
+    printf("\n[MODO GUARDIÃO ATIVO] Mantendo energia em 100 em tempo real...\n");
+    printf("Pressione Ctrl+C para fechar quando terminar o Chara World.\n\n");
+
+    int ticks = 0;
+    while (true) {
+        ticks++;
+        for (uintptr_t addr : energy_addrs) {
+            int32_t val = 100;
+            WriteProcessMemory(hProc, (LPVOID)addr, &val, 4, NULL);
         }
-    } else {
-        if (!hTargetMod) {
-            // Load chara_world.dll
-            size_t len = strlen(dll_full_path) + 1;
-            LPVOID pRemoteMem = VirtualAllocEx(hProcess, NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-            if (pRemoteMem) {
-                WriteProcessMemory(hProcess, pRemoteMem, dll_full_path, len, NULL);
-                HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
-                LPTHREAD_START_ROUTINE pfnLoadLibrary = (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "LoadLibraryA");
-                
-                HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, pfnLoadLibrary, pRemoteMem, 0, NULL);
-                if (hThread) {
-                    WaitForSingleObject(hThread, 3000);
-                    CloseHandle(hThread);
-                }
-                VirtualFreeEx(hProcess, pRemoteMem, 0, MEM_RELEASE);
-            }
-        } else {
-            // Call Mod_Enable
-            HMODULE hLocalMod = LoadLibraryA(dll_full_path);
-            if (hLocalMod) {
-                FARPROC pfnLocal = GetProcAddress(hLocalMod, "Mod_Enable");
-                uintptr_t offset = (uintptr_t)pfnLocal - (uintptr_t)hLocalMod;
-                LPTHREAD_START_ROUTINE pfnRemote = (LPTHREAD_START_ROUTINE)((uintptr_t)hTargetMod + offset);
 
-                HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, pfnRemote, NULL, 0, NULL);
-                if (hThread) {
-                    WaitForSingleObject(hThread, 2000);
-                    CloseHandle(hThread);
+        if (ticks % 20 == 0) {
+            // Re-sweep periodically in case of new turn allocations
+            curr = 0x10000;
+            while (curr < max_addr && VirtualQueryEx(hProc, (LPCVOID)curr, &mbi, sizeof(mbi))) {
+                if (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_READWRITE) && !(mbi.Protect & PAGE_GUARD)) {
+                    std::vector<uint8_t> buffer(mbi.RegionSize);
+                    SIZE_T bytesRead = 0;
+                    if (ReadProcessMemory(hProc, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead) && bytesRead >= 16) {
+                        for (size_t i = 0; i + 16 <= bytesRead; i += 4) {
+                            int32_t* p = (int32_t*)(buffer.data() + i);
+                            if (p[1] == 100 && p[0] >= 0 && p[0] <= 100 && p[2] == 0) {
+                                uintptr_t addr = (uintptr_t)mbi.BaseAddress + i;
+                                int32_t val = 100;
+                                WriteProcessMemory(hProc, (LPVOID)addr, &val, 4, NULL);
+                            }
+                        }
+                    }
                 }
-                FreeLibrary(hLocalMod);
+                curr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
             }
         }
-        printf("[SUCESSO] Mod Chara World ATIVADO (ON) na memoria do jogo!\n");
-        printf("  -> Energia congelada em 100/100 para movimentos e batalhas infinitas.\n");
+        Sleep(50);
     }
 
-    CloseHandle(hProcess);
-    printf("=================================================================\n");
+    CloseHandle(hProc);
     return 0;
 }
