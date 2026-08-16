@@ -1,13 +1,17 @@
 {
   "id": "item_world_speedup",
-  "name": "Item World - Multiplicador de Nível Acelerado",
+  "name": "Item World - Multiplicador de Nível Acelerado (+5 Lv)",
   "category": "Item World",
   "version": "1.0.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Acelera a progressão de equipamentos e armas no Mundo dos Itens, aumentando múltiplos níveis a cada andar concluído e garantindo subjugação automática de inocentes.",
-  "type": "toggle",
-  "enabled": true,
-  "components": "Script de progressão do Item World + Hook de andar",
+  "description": "Acelera a progressão de equipamentos e armas no Mundo dos Itens, aumentando múltiplos níveis a cada andar concluído e garantindo subjugação automática de inocentes (100% Subdued).",
+  "type": "action",
+  "action_label": "Apply",
+  "script": "APLICAR_MOD_ITEM_WORLD.py",
+  "components": [
+    "mods/item_world/APLICAR_MOD_ITEM_WORLD.py",
+    "mods/item_world/APLICAR_MOD_ITEM_WORLD.bat"
+  ],
   "options": [
     {
       "id": "levels_per_floor",

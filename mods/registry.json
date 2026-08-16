@@ -53,10 +53,37 @@
       "author": "Disgaea Mayhem Mod Team",
       "type": "action",
       "action_label": "Apply",
-      "description": "Acelera a evolução de armas e armaduras no Mundo dos Itens, concedendo +5 a +10 níveis a cada andar concluído.",
+      "description": "Acelera a evolução de armas e armaduras no Mundo dos Itens, concedendo +5 a +10 níveis a cada andar concluído e subjugando inocentes automaticamente.",
       "components": [
         "Script de progressão do Item World",
-        "Hook de finalização de andar"
+        "Hook nativo de andar e subjugador de inocentes"
+      ],
+      "options": [
+        {
+          "id": "levels_per_floor",
+          "name": "Níveis por Andar (+Lv)",
+          "type": "slider_int",
+          "min": 1,
+          "max": 10,
+          "default": 5,
+          "value": 5
+        },
+        {
+          "id": "auto_subdue",
+          "name": "Subjugar Inocentes (100% Subdued)",
+          "type": "toggle",
+          "default": true,
+          "value": true
+        },
+        {
+          "id": "mystery_room_rate",
+          "name": "Taxa de Mystery Rooms (%)",
+          "type": "slider_int",
+          "min": 10,
+          "max": 100,
+          "default": 75,
+          "value": 75
+        }
       ]
     }
   ]

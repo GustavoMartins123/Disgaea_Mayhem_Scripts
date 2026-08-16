@@ -809,59 +809,58 @@ static std::vector<ModItem> g_discovered_mods;
 static int g_selected_mod = 0;
 static bool g_mods_scanned = false;
 
-struct TicketInjectResult {
-    int count = 0;
-    char message[128] = {};
-};
-
-TicketInjectResult InjectBoostTicketsNative(uint32_t /*quantity*/ = 30) {
-    TicketInjectResult result = {};
-    SYSTEM_INFO sys_info = {};
-    GetSystemInfo(&sys_info);
-
-    uintptr_t address = reinterpret_cast<uintptr_t>(sys_info.lpMinimumApplicationAddress);
-    const uintptr_t max_address = reinterpret_cast<uintptr_t>(sys_info.lpMaximumApplicationAddress);
-
-    const uint32_t id_3003 = 3003;
-    const uint32_t id_3004 = 3004;
-    const uint32_t id_3005 = 3005;
-
-    MEMORY_BASIC_INFORMATION mbi = {};
-    while (address < max_address && VirtualQuery(reinterpret_cast<void*>(address), &mbi, sizeof(mbi))) {
-        if (mbi.State == MEM_COMMIT &&
-            (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE)) {
-            const uint8_t* buffer = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
-            const size_t size = mbi.RegionSize;
-            if (size >= 128) {
-                for (size_t i = 0; i <= size - 128; i += 4) {
-                    if (*reinterpret_cast<const uint32_t*>(buffer + i) == id_3003) {
-                        bool found_3004 = false, found_3005 = false;
-                        for (size_t j = i + 4; j < i + 128; j += 4) {
-                            if (*reinterpret_cast<const uint32_t*>(buffer + j) == id_3004) {
-                                found_3004 = true;
-                            }
-                            if (*reinterpret_cast<const uint32_t*>(buffer + j) == id_3005) {
-                                found_3005 = true;
-                            }
-                        }
-                        if (found_3004 && found_3005) {
-                            result.count++;
-                        }
-                    }
-                }
-            }
+// -----------------------------------------------------------------------------
+// Generic Standalone Mod Action Dispatcher (Completely Decoupled)
+// -----------------------------------------------------------------------------
+void ExecuteModActionGeneric(ModItem& mod) {
+    mod.action_applied = true;
+    
+    // 1. Check for standalone Batch script in mod folder (e.g. mods/<mod_id>/APLICAR_MOD_*.bat)
+    char search_pattern[MAX_PATH] = {};
+    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.bat", mod.id);
+    
+    WIN32_FIND_DATAA fd = {};
+    HANDLE hFind = FindFirstFileA(search_pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        char bat_path[MAX_PATH] = {};
+        std::snprintf(bat_path, sizeof(bat_path), "mods/%s/%s", mod.id, fd.cFileName);
+        FindClose(hFind);
+        
+        char cmd[MAX_PATH * 2] = {};
+        std::snprintf(cmd, sizeof(cmd), "cmd.exe /c start \"\" \"%s\"", bat_path);
+        STARTUPINFOA si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
         }
-        address = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", fd.cFileName);
+        return;
     }
-
-    if (result.count > 0) {
-        std::snprintf(result.message, sizeof(result.message),
-            "Sucesso! %d tabelas de Boost Tickets sincronizadas na RAM (+900%%).", result.count);
-    } else {
-        std::snprintf(result.message, sizeof(result.message),
-            "Boost Tickets 900%% prontos! Resgate no Carlbunch ou ative nas Opcoes.");
+    
+    // 2. Check for standalone Python script in mod folder (e.g. mods/<mod_id>/APLICAR_MOD_*.py)
+    std::snprintf(search_pattern, sizeof(search_pattern), "mods/%s/APLICAR_MOD_*.py", mod.id);
+    hFind = FindFirstFileA(search_pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        char py_path[MAX_PATH] = {};
+        std::snprintf(py_path, sizeof(py_path), "mods/%s/%s", mod.id, fd.cFileName);
+        FindClose(hFind);
+        
+        char cmd[MAX_PATH * 2] = {};
+        std::snprintf(cmd, sizeof(cmd), "python \"%s\"", py_path);
+        STARTUPINFOA si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+        std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", fd.cFileName);
+        return;
     }
-    return result;
+    
+    std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso.");
 }
 
 // -----------------------------------------------------------------------------
@@ -1169,20 +1168,7 @@ void ProcessGamepadNavigation(float /*dt*/) {
                         std::snprintf(mod.status, sizeof(mod.status),
                             mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
                     } else if (mod.type == ModType::Action) {
-                        if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
-                            uint32_t qty = 30;
-                            for (auto& opt : mod.options) {
-                                if (std::strcmp(opt.id, "ticket_amount") == 0) {
-                                    qty = static_cast<uint32_t>(opt.int_val);
-                                }
-                            }
-                            TicketInjectResult res = InjectBoostTicketsNative(qty);
-                            mod.action_applied = true;
-                            std::snprintf(mod.status, sizeof(mod.status), "%s", res.message);
-                        } else {
-                            mod.action_applied = true;
-                            std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
-                        }
+                        ExecuteModActionGeneric(mod);
                     }
                 }
             } else {
@@ -1452,20 +1438,7 @@ void BuildOverlay(const ImVec2& display_size) {
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.95f, 0.45f, 0.25f, 1.0f));
 
             if (ImGui::Button(btn_lbl, ImVec2(180, 34))) {
-                if (std::strcmp(mod.id, "dlc_boost_unlocker") == 0) {
-                    uint32_t qty = 30;
-                    for (auto& opt : mod.options) {
-                        if (std::strcmp(opt.id, "ticket_amount") == 0) {
-                            qty = static_cast<uint32_t>(opt.int_val);
-                        }
-                    }
-                    TicketInjectResult res = InjectBoostTicketsNative(qty);
-                    mod.action_applied = true;
-                    std::snprintf(mod.status, sizeof(mod.status), "%s", res.message);
-                } else {
-                    mod.action_applied = true;
-                    std::snprintf(mod.status, sizeof(mod.status), "Acao aplicada com sucesso!");
-                }
+                ExecuteModActionGeneric(mod);
                 g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                 g_gp_nav.focused_option = 0;
             }
