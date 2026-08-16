@@ -883,6 +883,74 @@ void ExecuteModActionGeneric(ModItem& mod) {
 }
 
 // -----------------------------------------------------------------------------
+// Generic Standalone Plugin Lifecycle Manager (Toggle & Options)
+// -----------------------------------------------------------------------------
+void NotifyModToggle(ModItem& mod) {
+    char dll_pattern[MAX_PATH] = {};
+    std::snprintf(dll_pattern, sizeof(dll_pattern), "mods/%s/*.dll", mod.id);
+    
+    WIN32_FIND_DATAA fd = {};
+    HANDLE hFind = FindFirstFileA(dll_pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        char dll_path[MAX_PATH] = {};
+        std::snprintf(dll_path, sizeof(dll_path), "mods/%s/%s", mod.id, fd.cFileName);
+        FindClose(hFind);
+        
+        HMODULE hMod = GetModuleHandleA(fd.cFileName);
+        if (!hMod) hMod = LoadLibraryA(dll_path);
+        
+        if (hMod) {
+            typedef void (*pfn_Mod_Enable)();
+            typedef void (*pfn_Mod_Disable)();
+            typedef void (*pfn_Mod_SetOption)(const char*, int, bool);
+            
+            pfn_Mod_Enable fn_enable = (pfn_Mod_Enable)(void*)GetProcAddress(hMod, "Mod_Enable");
+            pfn_Mod_Disable fn_disable = (pfn_Mod_Disable)(void*)GetProcAddress(hMod, "Mod_Disable");
+            pfn_Mod_SetOption fn_set_opt = (pfn_Mod_SetOption)(void*)GetProcAddress(hMod, "Mod_SetOption");
+            
+            if (mod.enabled) {
+                if (fn_enable) fn_enable();
+                if (fn_set_opt) {
+                    for (auto& opt : mod.options) {
+                        fn_set_opt(opt.id, opt.int_val, opt.bool_val);
+                    }
+                }
+                std::snprintf(mod.status, sizeof(mod.status), "Hook residente ATIVADO (ON) na memoria.");
+            } else {
+                if (fn_disable) fn_disable();
+                std::snprintf(mod.status, sizeof(mod.status), "Hook residente DESATIVADO (OFF).");
+            }
+            return;
+        }
+    }
+    
+    std::snprintf(mod.status, sizeof(mod.status), mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
+}
+
+void NotifyModOptionChanged(ModItem& mod, const ModOption& opt) {
+    char dll_pattern[MAX_PATH] = {};
+    std::snprintf(dll_pattern, sizeof(dll_pattern), "mods/%s/*.dll", mod.id);
+    
+    WIN32_FIND_DATAA fd = {};
+    HANDLE hFind = FindFirstFileA(dll_pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        char dll_path[MAX_PATH] = {};
+        std::snprintf(dll_path, sizeof(dll_path), "mods/%s/%s", mod.id, fd.cFileName);
+        FindClose(hFind);
+        
+        HMODULE hMod = GetModuleHandleA(fd.cFileName);
+        if (!hMod) hMod = LoadLibraryA(dll_path);
+        if (hMod) {
+            typedef void (*pfn_Mod_SetOption)(const char*, int, bool);
+            pfn_Mod_SetOption fn_set_opt = (pfn_Mod_SetOption)(void*)GetProcAddress(hMod, "Mod_SetOption");
+            if (fn_set_opt) {
+                fn_set_opt(opt.id, opt.int_val, opt.bool_val);
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Lightweight JSON Parser / Serializer for mod.json
 // -----------------------------------------------------------------------------
 std::string ReadFileToString(const char* filepath) {
@@ -1066,6 +1134,13 @@ void ScanAndDiscoverMods() {
     if (g_selected_mod >= static_cast<int>(g_discovered_mods.size())) {
         g_selected_mod = 0;
     }
+
+    // Auto-enable active toggle plugins on startup
+    for (auto& mod : g_discovered_mods) {
+        if (mod.type == ModType::Toggle && mod.enabled) {
+            NotifyModToggle(mod);
+        }
+    }
 }
 
 enum class ActiveFocusPanel {
@@ -1184,8 +1259,7 @@ void ProcessGamepadNavigation(float /*dt*/) {
                 if (a_btn && !last_a) {
                     if (mod.type == ModType::Toggle) {
                         mod.enabled = !mod.enabled;
-                        std::snprintf(mod.status, sizeof(mod.status),
-                            mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
+                        NotifyModToggle(mod);
                     } else if (mod.type == ModType::Action) {
                         ExecuteModActionGeneric(mod);
                     }
@@ -1196,30 +1270,40 @@ void ProcessGamepadNavigation(float /*dt*/) {
                 if (opt_idx < mod.options.size()) {
                     auto& opt = mod.options[opt_idx];
                     const int step_int = (opt.max_int - opt.min_int > 50) ? 5 : 1;
+                    bool changed = false;
 
                     if (opt.type == OptionType::SliderInt) {
                         if (left && !last_left) {
                             opt.int_val = std::max(opt.min_int, opt.int_val - step_int);
+                            changed = true;
                         }
                         if (right && !last_right) {
                             opt.int_val = std::min(opt.max_int, opt.int_val + step_int);
+                            changed = true;
                         }
                         if (a_btn && !last_a) {
-                            // Cycle slider value on A press
                             opt.int_val += step_int;
                             if (opt.int_val > opt.max_int) opt.int_val = opt.min_int;
+                            changed = true;
                         }
                     } else if (opt.type == OptionType::SliderFloat) {
                         if (left && !last_left) {
                             opt.float_val = std::max(opt.min_float, opt.float_val - 0.5f);
+                            changed = true;
                         }
                         if (right && !last_right) {
                             opt.float_val = std::min(opt.max_float, opt.float_val + 0.5f);
+                            changed = true;
                         }
                     } else if (opt.type == OptionType::Toggle) {
                         if ((left && !last_left) || (right && !last_right) || (a_btn && !last_a)) {
                             opt.bool_val = !opt.bool_val;
+                            changed = true;
                         }
+                    }
+
+                    if (changed) {
+                        NotifyModOptionChanged(mod, opt);
                     }
                 }
             }
@@ -1423,7 +1507,7 @@ void BuildOverlay(const ImVec2& display_size) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.85f, 0.35f, 1.0f));
                 if (ImGui::Button(is_opt0_focused ? " > [ ATIVADO (ON) ] < " : "  [ ATIVADO (ON) ]  ", ImVec2(180, 34))) {
                     mod.enabled = false;
-                    std::snprintf(mod.status, sizeof(mod.status), "Mod desativado pelo usuario.");
+                    NotifyModToggle(mod);
                     g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                     g_gp_nav.focused_option = 0;
                 }
@@ -1434,7 +1518,7 @@ void BuildOverlay(const ImVec2& display_size) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
                 if (ImGui::Button(is_opt0_focused ? " > [ DESATIVADO (OFF) ] < " : "  [ DESATIVADO (OFF) ]  ", ImVec2(180, 34))) {
                     mod.enabled = true;
-                    std::snprintf(mod.status, sizeof(mod.status), "Mod ativado com sucesso.");
+                    NotifyModToggle(mod);
                     g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                     g_gp_nav.focused_option = 0;
                 }
@@ -1486,6 +1570,7 @@ void BuildOverlay(const ImVec2& display_size) {
                     char chk_lbl[128];
                     std::snprintf(chk_lbl, sizeof(chk_lbl), "%s%s", is_cur_opt_focused ? "> " : "  ", opt.name);
                     if (ImGui::Checkbox(chk_lbl, &opt.bool_val)) {
+                        NotifyModOptionChanged(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                         g_gp_nav.focused_option = static_cast<int>(j + 1);
                     }
@@ -1497,6 +1582,7 @@ void BuildOverlay(const ImVec2& display_size) {
                     }
                     ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
                     if (ImGui::SliderInt("##slider", &opt.int_val, opt.min_int, opt.max_int)) {
+                        NotifyModOptionChanged(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                         g_gp_nav.focused_option = static_cast<int>(j + 1);
                     }
@@ -1509,6 +1595,7 @@ void BuildOverlay(const ImVec2& display_size) {
                     }
                     ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
                     if (ImGui::SliderFloat("##slider", &opt.float_val, opt.min_float, opt.max_float, "%.1f")) {
+                        NotifyModOptionChanged(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                         g_gp_nav.focused_option = static_cast<int>(j + 1);
                     }

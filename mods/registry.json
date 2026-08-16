@@ -47,16 +47,16 @@
     },
     {
       "id": "item_world_speedup",
-      "name": "Item World - Multiplicador de Nível Acelerado (+5 Lv)",
+      "name": "Item World - Multiplicador de Nível & Inocentes",
       "category": "Item World",
       "version": "1.0.0",
       "author": "Disgaea Mayhem Mod Team",
-      "type": "action",
-      "action_label": "Apply",
-      "description": "Acelera a evolução de armas e armaduras no Mundo dos Itens, concedendo +5 a +10 níveis a cada andar concluído e subjugando inocentes automaticamente.",
+      "type": "toggle",
+      "enabled": true,
+      "description": "Acelera a evolução no Mundo dos Itens. Quando ativado (ON), o hook residente em memória intercepta a conclusão de cada andar multiplicando o ganho de níveis e subjugando 100% dos Inocentes automaticamente.",
       "components": [
-        "Script de progressão do Item World",
-        "Hook nativo de andar e subjugador de inocentes"
+        "mods/item_world/item_world.dll",
+        "Hook residente de andar e subjugador de inocentes"
       ],
       "options": [
         {
