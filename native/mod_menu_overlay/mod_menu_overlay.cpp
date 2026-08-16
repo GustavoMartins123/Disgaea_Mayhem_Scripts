@@ -797,6 +797,7 @@ struct ModItem {
     char author[64] = {};
     char description[512] = {};
     char components[256] = {};
+    char plugin[64] = {};
     char action_label[32] = "Apply";
     ModType type = ModType::Toggle;
     bool enabled = true;
@@ -883,36 +884,111 @@ void ExecuteModActionGeneric(ModItem& mod) {
 }
 
 // -----------------------------------------------------------------------------
+// Mod Loader Logging System (UE4SS-Inspired)
+// -----------------------------------------------------------------------------
+namespace ModLogger {
+    static FILE* g_log_file = nullptr;
+    
+    inline void Init(const char* exe_dir) {
+        if (!g_log_file) {
+            char log_path[MAX_PATH] = {};
+            std::snprintf(log_path, sizeof(log_path), "%s\\mods\\mod_loader.log", exe_dir);
+            g_log_file = fopen(log_path, "w");
+            if (g_log_file) {
+                fprintf(g_log_file, "=================================================================\n");
+                fprintf(g_log_file, "  Disgaea Mayhem Mod Loader (UE4SS-Style Dynamic Architecture)\n");
+                fprintf(g_log_file, "=================================================================\n");
+                fflush(g_log_file);
+            }
+        }
+    }
+
+    inline void Log(const char* fmt, ...) {
+        if (!g_log_file) return;
+        char buf[1024] = {};
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        va_end(args);
+        fprintf(g_log_file, "%s\n", buf);
+        fflush(g_log_file);
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Generic Standalone Plugin Lifecycle Manager (Toggle & Options)
 // -----------------------------------------------------------------------------
+static bool ResolveModDllPath(const char* exe_dir, const ModItem& mod, char* out_dll_path, size_t max_len, char* out_dll_name, size_t name_len) {
+    const char* folder_candidates[] = { mod.dir_name, mod.id };
+    
+    for (const char* folder : folder_candidates) {
+        if (!folder || folder[0] == '\0') continue;
+
+        // 1. If explicit plugin specified in mod.json
+        if (mod.plugin[0] != '\0') {
+            std::snprintf(out_dll_path, max_len, "%s\\mods\\%s\\%s", exe_dir, folder, mod.plugin);
+            if (GetFileAttributesA(out_dll_path) != INVALID_FILE_ATTRIBUTES) {
+                if (out_dll_name) std::snprintf(out_dll_name, name_len, "%s", mod.plugin);
+                return true;
+            }
+        }
+
+        // 2. Search for any .dll in mods/<folder>/*.dll
+        char pattern[MAX_PATH] = {};
+        std::snprintf(pattern, sizeof(pattern), "%s\\mods\\%s\\*.dll", exe_dir, folder);
+        WIN32_FIND_DATAA fd = {};
+        HANDLE hFind = FindFirstFileA(pattern, &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            std::snprintf(out_dll_path, max_len, "%s\\mods\\%s\\%s", exe_dir, folder, fd.cFileName);
+            if (out_dll_name) std::snprintf(out_dll_name, name_len, "%s", fd.cFileName);
+            FindClose(hFind);
+            return true;
+        }
+
+        // 3. Search in mods/<folder>/dlls/*.dll (UE4SS standard layout)
+        std::snprintf(pattern, sizeof(pattern), "%s\\mods\\%s\\dlls\\*.dll", exe_dir, folder);
+        hFind = FindFirstFileA(pattern, &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            std::snprintf(out_dll_path, max_len, "%s\\mods\\%s\\dlls\\%s", exe_dir, folder, fd.cFileName);
+            if (out_dll_name) std::snprintf(out_dll_name, name_len, "%s", fd.cFileName);
+            FindClose(hFind);
+            return true;
+        }
+    }
+    return false;
+}
+
 void NotifyModToggle(ModItem& mod) {
     char exe_dir[MAX_PATH] = {};
     GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
     char* last_slash = strrchr(exe_dir, '\\');
     if (last_slash) *last_slash = '\0';
 
+    ModLogger::Init(exe_dir);
+
     // 1. Sync enabled.txt on disk
+    const char* target_folder = (mod.dir_name[0] != '\0') ? mod.dir_name : mod.id;
     char enabled_path[MAX_PATH] = {};
-    std::snprintf(enabled_path, sizeof(enabled_path), "%s\\mods\\%s\\enabled.txt", exe_dir, mod.id);
+    std::snprintf(enabled_path, sizeof(enabled_path), "%s\\mods\\%s\\enabled.txt", exe_dir, target_folder);
     FILE* f_enabled = fopen(enabled_path, "w");
     if (f_enabled) {
         fputc(mod.enabled ? '1' : '0', f_enabled);
         fclose(f_enabled);
     }
 
-    // 2. Dispatch to resident plugin DLL
-    char dll_pattern[MAX_PATH] = {};
-    std::snprintf(dll_pattern, sizeof(dll_pattern), "%s\\mods\\%s\\*.dll", exe_dir, mod.id);
-    
-    WIN32_FIND_DATAA fd = {};
-    HANDLE hFind = FindFirstFileA(dll_pattern, &fd);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        char dll_path[MAX_PATH] = {};
-        std::snprintf(dll_path, sizeof(dll_path), "%s\\mods\\%s\\%s", exe_dir, mod.id, fd.cFileName);
-        FindClose(hFind);
-        
-        HMODULE hMod = GetModuleHandleA(fd.cFileName);
-        if (!hMod) hMod = LoadLibraryA(dll_path);
+    // 2. Locate and dispatch to resident plugin DLL
+    char dll_path[MAX_PATH] = {};
+    char dll_name[MAX_PATH] = {};
+    if (ResolveModDllPath(exe_dir, mod, dll_path, sizeof(dll_path), dll_name, sizeof(dll_name))) {
+        HMODULE hMod = GetModuleHandleA(dll_name);
+        if (!hMod) {
+            hMod = LoadLibraryA(dll_path);
+            if (hMod) {
+                ModLogger::Log("[ModLoader] [LOAD_DLL] Mod: %s -> %s (HMODULE: %p)", mod.name, dll_path, hMod);
+            } else {
+                ModLogger::Log("[ModLoader] [ERROR] Falha ao carregar DLL: %s (Win32 Error: %lu)", dll_path, GetLastError());
+            }
+        }
         
         if (hMod) {
             typedef void (*pfn_Mod_Enable)();
@@ -930,13 +1006,17 @@ void NotifyModToggle(ModItem& mod) {
                         fn_set_opt(opt.id, opt.int_val, opt.bool_val);
                     }
                 }
+                ModLogger::Log("[ModLoader] [ENABLE] Mod: %s ATIVADO (ON)", mod.name);
                 std::snprintf(mod.status, sizeof(mod.status), "Hook residente ATIVADO (ON) na memoria.");
             } else {
                 if (fn_disable) fn_disable();
+                ModLogger::Log("[ModLoader] [DISABLE] Mod: %s DESATIVADO (OFF)", mod.name);
                 std::snprintf(mod.status, sizeof(mod.status), "Hook residente DESATIVADO (OFF).");
             }
             return;
         }
+    } else {
+        ModLogger::Log("[ModLoader] [WARN] Mod sem DLL residente: %s", mod.name);
     }
     
     std::snprintf(mod.status, sizeof(mod.status), mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
@@ -948,17 +1028,10 @@ void NotifyModOptionChanged(ModItem& mod, const ModOption& opt) {
     char* last_slash = strrchr(exe_dir, '\\');
     if (last_slash) *last_slash = '\0';
 
-    char dll_pattern[MAX_PATH] = {};
-    std::snprintf(dll_pattern, sizeof(dll_pattern), "%s\\mods\\%s\\*.dll", exe_dir, mod.id);
-    
-    WIN32_FIND_DATAA fd = {};
-    HANDLE hFind = FindFirstFileA(dll_pattern, &fd);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        char dll_path[MAX_PATH] = {};
-        std::snprintf(dll_path, sizeof(dll_path), "%s\\mods\\%s\\%s", exe_dir, mod.id, fd.cFileName);
-        FindClose(hFind);
-        
-        HMODULE hMod = GetModuleHandleA(fd.cFileName);
+    char dll_path[MAX_PATH] = {};
+    char dll_name[MAX_PATH] = {};
+    if (ResolveModDllPath(exe_dir, mod, dll_path, sizeof(dll_path), dll_name, sizeof(dll_name))) {
+        HMODULE hMod = GetModuleHandleA(dll_name);
         if (!hMod) hMod = LoadLibraryA(dll_path);
         if (hMod) {
             typedef void (*pfn_Mod_SetOption)(const char*, int, bool);
@@ -1047,6 +1120,7 @@ void ParseModJson(const std::string& filepath, ModItem& mod) {
     std::string author = JsonExtractString(json, "author");
     std::string desc = JsonExtractString(json, "description");
     std::string comps = JsonExtractString(json, "components");
+    std::string plugin = JsonExtractString(json, "plugin");
     std::string type_str = JsonExtractString(json, "type");
     std::string action_lbl = JsonExtractString(json, "action_label");
 
@@ -1057,6 +1131,7 @@ void ParseModJson(const std::string& filepath, ModItem& mod) {
     if (!author.empty()) std::snprintf(mod.author, sizeof(mod.author), "%s", author.c_str());
     if (!desc.empty()) std::snprintf(mod.description, sizeof(mod.description), "%s", desc.c_str());
     if (!comps.empty()) std::snprintf(mod.components, sizeof(mod.components), "%s", comps.c_str());
+    if (!plugin.empty()) std::snprintf(mod.plugin, sizeof(mod.plugin), "%s", plugin.c_str());
     if (!action_lbl.empty()) std::snprintf(mod.action_label, sizeof(mod.action_label), "%s", action_lbl.c_str());
 
     if (type_str == "action") {
@@ -1129,10 +1204,18 @@ void ScanAndDiscoverMods() {
     wchar_t* last_slash = wcsrchr(exe_path, L'\\');
     if (last_slash) *last_slash = L'\0';
 
+    char exe_dir_a[MAX_PATH] = {};
+    WideCharToMultiByte(CP_UTF8, 0, exe_path, -1, exe_dir_a, sizeof(exe_dir_a), nullptr, nullptr);
+    ModLogger::Init(exe_dir_a);
+    ModLogger::Log("[ModLoader] [SCAN] Iniciando varredura da pasta mods em: %s\\mods", exe_dir_a);
+
     std::wstring mods_search = std::wstring(exe_path) + L"\\mods\\*";
     WIN32_FIND_DATAW find_data = {};
     HANDLE hFind = FindFirstFileW(mods_search.c_str(), &find_data);
-    if (hFind == INVALID_HANDLE_VALUE) return;
+    if (hFind == INVALID_HANDLE_VALUE) {
+        ModLogger::Log("[ModLoader] [WARN] Pasta mods nao encontrada.");
+        return;
+    }
 
     do {
         if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
@@ -1142,24 +1225,46 @@ void ScanAndDiscoverMods() {
             _wcsicmp(find_data.cFileName, L"main_menu") != 0 &&
             _wcsicmp(find_data.cFileName, L"mod_menu") != 0) {
             
+            char dir_name_a[64] = {};
+            WideCharToMultiByte(CP_UTF8, 0, find_data.cFileName, -1, dir_name_a, sizeof(dir_name_a), nullptr, nullptr);
+
+            ModItem mod = {};
+            std::snprintf(mod.dir_name, sizeof(mod.dir_name), "%s", dir_name_a);
+            std::snprintf(mod.id, sizeof(mod.id), "%s", dir_name_a);
+
             std::wstring json_wpath = std::wstring(exe_path) + L"\\mods\\" + find_data.cFileName + L"\\mod.json";
             DWORD attr = GetFileAttributesW(json_wpath.c_str());
             if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                ModItem mod = {};
-                char dir_name_a[64] = {};
                 char json_path_a[MAX_PATH] = {};
-                WideCharToMultiByte(CP_UTF8, 0, find_data.cFileName, -1, dir_name_a, sizeof(dir_name_a), nullptr, nullptr);
                 WideCharToMultiByte(CP_UTF8, 0, json_wpath.c_str(), -1, json_path_a, sizeof(json_path_a), nullptr, nullptr);
-
-                std::snprintf(mod.dir_name, sizeof(mod.dir_name), "%s", dir_name_a);
                 std::snprintf(mod.json_path, sizeof(mod.json_path), "%s", json_path_a);
-                
                 ParseModJson(json_path_a, mod);
-                if (mod.name[0] == '\0') {
-                    std::snprintf(mod.name, sizeof(mod.name), "%s", mod.dir_name);
+            } else {
+                // Mod sem mod.json -> defaults UE4SS style
+                std::snprintf(mod.name, sizeof(mod.name), "%s", dir_name_a);
+                mod.type = ModType::Toggle;
+                
+                // Read enabled.txt
+                char enabled_path[MAX_PATH] = {};
+                std::snprintf(enabled_path, sizeof(enabled_path), "%s\\mods\\%s\\enabled.txt", exe_dir_a, dir_name_a);
+                FILE* f_en = fopen(enabled_path, "r");
+                if (f_en) {
+                    char ch = 0;
+                    if (fread(&ch, 1, 1, f_en) == 1) {
+                        mod.enabled = (ch == '1');
+                    }
+                    fclose(f_en);
+                } else {
+                    mod.enabled = true;
                 }
-                g_discovered_mods.push_back(mod);
             }
+
+            if (mod.name[0] == '\0') {
+                std::snprintf(mod.name, sizeof(mod.name), "%s", mod.dir_name);
+            }
+            g_discovered_mods.push_back(mod);
+            ModLogger::Log("[ModLoader] [FOUND] Mod: %s (Dir: %s, Enabled: %s)", 
+                mod.name, mod.dir_name, mod.enabled ? "ON" : "OFF");
         }
     } while (FindNextFileW(hFind, &find_data));
     FindClose(hFind);
@@ -1168,6 +1273,8 @@ void ScanAndDiscoverMods() {
     if (g_selected_mod >= static_cast<int>(g_discovered_mods.size())) {
         g_selected_mod = 0;
     }
+
+    ModLogger::Log("[ModLoader] [INIT] Inicializando mods ativos no boot...");
 
     // Auto-enable active toggle plugins on startup
     for (auto& mod : g_discovered_mods) {
