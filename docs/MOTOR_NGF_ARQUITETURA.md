@@ -34,3 +34,38 @@ O fluxo do jogo é desacoplado em tarefas assíncronas modulares:
 * **`CTask`:** Representa uma tarefa ou subsistema ativo (ex: `CTask_Explore_ItemWorldClear`, `CTask_CharacterWorldGame_Move`).
 * **`CState`:** Máquina de estados finitos que gerencia as fases da tarefa (ex: `CState_Main`, `CState_Item`, `CState_Performance`).
 * **`CUIUnion`:** Componentes de interface de usuário modulares anexados às tarefas de renderização.
+
+---
+
+## 🎮 4. Camada de Input `Nmpl::Input`
+
+O executável consulta teclado, mouse e controle por exports C++ de
+`NmplDLL.dll`. O Mod Menu resolve esses exports pelo nome decorado e rejeita a
+inicialização se algum contrato obrigatório não estiver presente.
+
+### Teclado e mouse
+
+- `CKeyboard::press`, `trigger`, `repeat` e `release` são os pontos de consulta
+  usados pelo jogo.
+- `CMouseWin::isPress`, `isTrigger`, `isRepeat`, `isRelease`, `axisX` e `axisY`
+  formam o caminho de consulta do mouse.
+- Enquanto o overlay está aberto, os hooks retornam estado neutro. Quando está
+  fechado, despacham para a implementação original.
+
+### Controle
+
+`CPad` ocupa `0x270` bytes na build validada. Os offsets relevantes confirmados
+na desmontagem de `NmplDLL.dll` são:
+
+| Offset | Tamanho | Conteúdo |
+| :--- | :--- | :--- |
+| `+0x00..+0x1F` | `0x20` | Máscaras `now`, `trig`, `rept` e `release` |
+| `+0x30` | `uint8_t` | Índice usado por `CPad::rawData` |
+| `+0x40/+0x44` | `float` | Gatilhos analógicos |
+| `+0x258..+0x26B` | `0x14` | Estado dos eixos analógicos |
+
+`CPad::rawData` seleciona um bloco nativo de `0x138` bytes. O hook de
+`CNmplInput::update(float)` chama a rotina original e, durante a captura
+exclusiva, limpa botões, repetição, gatilhos e eixos dos quatro `CPad`. O overlay
+lê o controle separadamente por XInput, portanto continua navegável sem entregar
+os mesmos comandos ao jogo.

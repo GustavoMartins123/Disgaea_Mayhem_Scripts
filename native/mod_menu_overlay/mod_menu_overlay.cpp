@@ -8,8 +8,11 @@
 #include <dxgi1_4.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -96,13 +99,12 @@ DXGI_FORMAT g_rtv_format = DXGI_FORMAT_UNKNOWN;
 HWND g_output_window = nullptr;
 bool g_imgui_context_created = false;
 bool g_imgui_backend_created = false;
-bool g_overlay_visible = false;
-bool g_waiting_for_back_release = false;
+std::atomic<bool> g_overlay_visible{false};
+std::atomic<bool> g_waiting_for_back_release{false};
 bool g_last_b_down = false;
 bool g_last_escape_down = false;
 LARGE_INTEGER g_last_counter = {};
 LARGE_INTEGER g_counter_frequency = {};
-void* g_hook_stub = nullptr;
 
 template <typename T>
 void SafeRelease(T*& value) {
@@ -203,34 +205,57 @@ bool ControllerBDown() {
 bool EscapeDown() {
     return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
 }
+
+bool ModMenuHotkeyKeyboardDown() {
+    return (GetAsyncKeyState(VK_F1) & 0x8000) != 0 ||
+           (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0 ||
+           (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+}
+
 bool ModMenuHotkeyKeyboardPressed() {
     static bool was_pressed = false;
-    bool is_pressed = (GetAsyncKeyState(VK_F1) & 0x8000) != 0 ||
-                      (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0 ||
-                      (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+    const bool is_pressed = ModMenuHotkeyKeyboardDown();
     bool triggered = is_pressed && !was_pressed;
     was_pressed = is_pressed;
     return triggered;
 }
 
-bool ModMenuHotkeyGamepadPressed() {
-    static bool was_pressed = false;
-    bool is_pressed = false;
+bool ModMenuHotkeyGamepadDown() {
     for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
         XINPUT_STATE state = {};
         if (SafeXInputGetState(index, &state) == ERROR_SUCCESS) {
-            WORD b = state.Gamepad.wButtons;
+            const WORD b = state.Gamepad.wButtons;
             // L3 + R3 (both thumbsticks clicked) OR Select / Back button
             if ((((b & XINPUT_GAMEPAD_LEFT_THUMB) != 0) && ((b & XINPUT_GAMEPAD_RIGHT_THUMB) != 0)) ||
                 ((b & XINPUT_GAMEPAD_BACK) != 0)) {
-                is_pressed = true;
-                break;
+                return true;
             }
         }
     }
+    return false;
+}
+
+bool ModMenuHotkeyGamepadPressed() {
+    static bool was_pressed = false;
+    const bool is_pressed = ModMenuHotkeyGamepadDown();
     bool triggered = is_pressed && !was_pressed;
     was_pressed = is_pressed;
     return triggered;
+}
+
+bool InputCaptureActive() {
+    return g_overlay_visible.load(std::memory_order_acquire) ||
+           g_waiting_for_back_release.load(std::memory_order_acquire);
+}
+
+void OpenOverlay() {
+    g_waiting_for_back_release.store(false, std::memory_order_release);
+    g_overlay_visible.store(true, std::memory_order_release);
+}
+
+void CloseOverlay() {
+    g_waiting_for_back_release.store(true, std::memory_order_release);
+    g_overlay_visible.store(false, std::memory_order_release);
 }
 
 
@@ -316,73 +341,352 @@ bool WaitForOverlayGpu() {
 
 static WNDPROC g_original_wndproc = nullptr;
 
+ImGuiKey VirtualKeyToImGuiKey(WPARAM virtual_key, LPARAM lparam) {
+    if (virtual_key >= '0' && virtual_key <= '9') {
+        return static_cast<ImGuiKey>(ImGuiKey_0 + (virtual_key - '0'));
+    }
+    if (virtual_key >= 'A' && virtual_key <= 'Z') {
+        return static_cast<ImGuiKey>(ImGuiKey_A + (virtual_key - 'A'));
+    }
+    if (virtual_key >= VK_F1 && virtual_key <= VK_F12) {
+        return static_cast<ImGuiKey>(ImGuiKey_F1 + (virtual_key - VK_F1));
+    }
+
+    switch (virtual_key) {
+        case VK_TAB: return ImGuiKey_Tab;
+        case VK_LEFT: return ImGuiKey_LeftArrow;
+        case VK_RIGHT: return ImGuiKey_RightArrow;
+        case VK_UP: return ImGuiKey_UpArrow;
+        case VK_DOWN: return ImGuiKey_DownArrow;
+        case VK_PRIOR: return ImGuiKey_PageUp;
+        case VK_NEXT: return ImGuiKey_PageDown;
+        case VK_HOME: return ImGuiKey_Home;
+        case VK_END: return ImGuiKey_End;
+        case VK_INSERT: return ImGuiKey_Insert;
+        case VK_DELETE: return ImGuiKey_Delete;
+        case VK_BACK: return ImGuiKey_Backspace;
+        case VK_SPACE: return ImGuiKey_Space;
+        case VK_RETURN: return ImGuiKey_Enter;
+        case VK_ESCAPE: return ImGuiKey_Escape;
+        case VK_LCONTROL: return ImGuiKey_LeftCtrl;
+        case VK_RCONTROL: return ImGuiKey_RightCtrl;
+        case VK_LSHIFT: return ImGuiKey_LeftShift;
+        case VK_RSHIFT: return ImGuiKey_RightShift;
+        case VK_LMENU: return ImGuiKey_LeftAlt;
+        case VK_RMENU: return ImGuiKey_RightAlt;
+        case VK_LWIN: return ImGuiKey_LeftSuper;
+        case VK_RWIN: return ImGuiKey_RightSuper;
+        case VK_CONTROL:
+            return (lparam & 0x01000000) != 0 ? ImGuiKey_RightCtrl : ImGuiKey_LeftCtrl;
+        case VK_MENU:
+            return (lparam & 0x01000000) != 0 ? ImGuiKey_RightAlt : ImGuiKey_LeftAlt;
+        case VK_SHIFT: {
+            const UINT scan_code = static_cast<UINT>((lparam >> 16) & 0xFF);
+            return MapVirtualKeyW(scan_code, MAPVK_VSC_TO_VK_EX) == VK_RSHIFT
+                ? ImGuiKey_RightShift
+                : ImGuiKey_LeftShift;
+        }
+        default: return ImGuiKey_None;
+    }
+}
+
+bool IsMouseInputMessage(UINT message) {
+    return (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) ||
+           message == WM_MOUSELEAVE || message == WM_MOUSEHOVER;
+}
+
+bool IsKeyboardInputMessage(UINT message) {
+    return (message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
+           message == WM_SYSKEYDOWN || message == WM_SYSKEYUP ||
+           message == WM_UNICHAR;
+}
+
 LRESULT CALLBACK ModMenuWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    if (g_imgui_context_created && g_overlay_visible) {
+    if (g_imgui_context_created && InputCaptureActive()) {
         ImGuiIO& io = ImGui::GetIO();
-        
-        switch (msg) {
-            case WM_LBUTTONDOWN:
-            case WM_LBUTTONDBLCLK:
-                io.AddMouseButtonEvent(0, true);
-                return 0;
-            case WM_LBUTTONUP:
-                io.AddMouseButtonEvent(0, false);
-                return 0;
-            case WM_RBUTTONDOWN:
-            case WM_RBUTTONDBLCLK:
-                io.AddMouseButtonEvent(1, true);
-                return 0;
-            case WM_RBUTTONUP:
-                io.AddMouseButtonEvent(1, false);
-                return 0;
-            case WM_MOUSEMOVE: {
-                const float x = static_cast<float>(static_cast<short>(LOWORD(lparam)));
-                const float y = static_cast<float>(static_cast<short>(HIWORD(lparam)));
-                io.AddMousePosEvent(x, y);
-                return 0;
-            }
-            case WM_MOUSEWHEEL: {
-                const float delta = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
-                io.AddMouseWheelEvent(0.0f, delta);
-                return 0;
-            }
-            case WM_KEYDOWN:
-            case WM_SYSKEYDOWN: {
-                if (wparam == VK_RETURN) io.AddKeyEvent(ImGuiKey_Enter, true);
-                else if (wparam == VK_SPACE) io.AddKeyEvent(ImGuiKey_Space, true);
-                else if (wparam == VK_ESCAPE) io.AddKeyEvent(ImGuiKey_Escape, true);
-                else if (wparam == VK_UP) io.AddKeyEvent(ImGuiKey_UpArrow, true);
-                else if (wparam == VK_DOWN) io.AddKeyEvent(ImGuiKey_DownArrow, true);
-                else if (wparam == VK_LEFT) io.AddKeyEvent(ImGuiKey_LeftArrow, true);
-                else if (wparam == VK_RIGHT) io.AddKeyEvent(ImGuiKey_RightArrow, true);
-                else if (wparam == VK_TAB) io.AddKeyEvent(ImGuiKey_Tab, true);
-                return 0;
-            }
-            case WM_KEYUP:
-            case WM_SYSKEYUP: {
-                if (wparam == VK_RETURN) io.AddKeyEvent(ImGuiKey_Enter, false);
-                else if (wparam == VK_SPACE) io.AddKeyEvent(ImGuiKey_Space, false);
-                else if (wparam == VK_ESCAPE) io.AddKeyEvent(ImGuiKey_Escape, false);
-                else if (wparam == VK_UP) io.AddKeyEvent(ImGuiKey_UpArrow, false);
-                else if (wparam == VK_DOWN) io.AddKeyEvent(ImGuiKey_DownArrow, false);
-                else if (wparam == VK_LEFT) io.AddKeyEvent(ImGuiKey_LeftArrow, false);
-                else if (wparam == VK_RIGHT) io.AddKeyEvent(ImGuiKey_RightArrow, false);
-                else if (wparam == VK_TAB) io.AddKeyEvent(ImGuiKey_Tab, false);
-                return 0;
-            }
-            case WM_CHAR: {
-                if (wparam > 0 && wparam < 0x10000) {
-                    io.AddInputCharacter(static_cast<unsigned int>(wparam));
+        const bool visible = g_overlay_visible.load(std::memory_order_acquire);
+
+        if (visible) {
+            switch (msg) {
+                case WM_LBUTTONDOWN:
+                case WM_LBUTTONDBLCLK: io.AddMouseButtonEvent(0, true); break;
+                case WM_LBUTTONUP: io.AddMouseButtonEvent(0, false); break;
+                case WM_RBUTTONDOWN:
+                case WM_RBUTTONDBLCLK: io.AddMouseButtonEvent(1, true); break;
+                case WM_RBUTTONUP: io.AddMouseButtonEvent(1, false); break;
+                case WM_MBUTTONDOWN:
+                case WM_MBUTTONDBLCLK: io.AddMouseButtonEvent(2, true); break;
+                case WM_MBUTTONUP: io.AddMouseButtonEvent(2, false); break;
+                case WM_XBUTTONDOWN:
+                case WM_XBUTTONDBLCLK:
+                    io.AddMouseButtonEvent(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? 3 : 4, true);
+                    break;
+                case WM_XBUTTONUP:
+                    io.AddMouseButtonEvent(GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? 3 : 4, false);
+                    break;
+                case WM_MOUSEMOVE:
+                    io.AddMousePosEvent(
+                        static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                        static_cast<float>(static_cast<short>(HIWORD(lparam))));
+                    break;
+                case WM_MOUSELEAVE: io.AddMousePosEvent(-FLT_MAX, -FLT_MAX); break;
+                case WM_MOUSEWHEEL:
+                    io.AddMouseWheelEvent(
+                        0.0f,
+                        static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) /
+                            static_cast<float>(WHEEL_DELTA));
+                    break;
+                case WM_MOUSEHWHEEL:
+                    io.AddMouseWheelEvent(
+                        static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) /
+                            static_cast<float>(WHEEL_DELTA),
+                        0.0f);
+                    break;
+                case WM_KEYDOWN:
+                case WM_SYSKEYDOWN:
+                case WM_KEYUP:
+                case WM_SYSKEYUP: {
+                    const ImGuiKey key = VirtualKeyToImGuiKey(wparam, lparam);
+                    if (key != ImGuiKey_None) {
+                        io.AddKeyEvent(key, msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
+                    }
+                    break;
                 }
-                return 0;
+                case WM_CHAR:
+                    if (wparam > 0 && wparam < 0x10000) {
+                        io.AddInputCharacter(static_cast<unsigned int>(wparam));
+                    }
+                    break;
+                case WM_UNICHAR:
+                    if (wparam == UNICODE_NOCHAR) return TRUE;
+                    io.AddInputCharacter(static_cast<unsigned int>(wparam));
+                    break;
+                case WM_SETFOCUS: io.AddFocusEvent(true); break;
+                case WM_KILLFOCUS: io.AddFocusEvent(false); break;
+                case WM_SETCURSOR:
+                    SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)));
+                    return TRUE;
             }
-            case WM_SETCURSOR: {
-                SetCursor(LoadCursor(nullptr, IDC_ARROW));
-                return TRUE;
-            }
+        }
+
+        if (msg == WM_INPUT) {
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+        }
+        if (IsMouseInputMessage(msg) || IsKeyboardInputMessage(msg) ||
+            msg == WM_INPUT_DEVICE_CHANGE || msg == WM_APPCOMMAND) {
+            return msg == WM_XBUTTONDOWN || msg == WM_XBUTTONUP || msg == WM_XBUTTONDBLCLK
+                ? TRUE
+                : 0;
         }
     }
     return CallWindowProcW(g_original_wndproc, hwnd, msg, wparam, lparam);
+}
+
+using KeyboardQueryFn = bool (*)(void*, int);
+using MouseButtonQueryFn = bool (*)(void*, int, int);
+using MouseAxisQueryFn = LONG (*)(void*, int);
+using PadRawDataFn = void* (*)(void*);
+using NmplInputUpdateFn = void (*)(float);
+using PadManagerGetInstanceFn = void* (*)();
+using PadManagerGetPadFn = void* (*)(void*, int);
+using PadClearButtonsFn = void (*)(void*, std::uint64_t);
+using PadStopRepeatFn = void (*)(void*);
+
+KeyboardQueryFn g_original_keyboard_press = nullptr;
+KeyboardQueryFn g_original_keyboard_trigger = nullptr;
+KeyboardQueryFn g_original_keyboard_repeat = nullptr;
+KeyboardQueryFn g_original_keyboard_release = nullptr;
+MouseButtonQueryFn g_original_mouse_press = nullptr;
+MouseButtonQueryFn g_original_mouse_trigger = nullptr;
+MouseButtonQueryFn g_original_mouse_repeat = nullptr;
+MouseButtonQueryFn g_original_mouse_release = nullptr;
+MouseAxisQueryFn g_original_mouse_axis_x = nullptr;
+MouseAxisQueryFn g_original_mouse_axis_y = nullptr;
+PadRawDataFn g_original_pad_raw_data = nullptr;
+NmplInputUpdateFn g_original_nmpl_input_update = nullptr;
+PadManagerGetInstanceFn g_pad_manager_get_instance = nullptr;
+PadManagerGetPadFn g_pad_manager_get_pad = nullptr;
+PadClearButtonsFn g_pad_clear_buttons = nullptr;
+PadStopRepeatFn g_pad_stop_repeat = nullptr;
+alignas(16) std::array<std::uint8_t, 0x138> g_neutral_pad_data = {};
+
+bool HookKeyboardPress(void* keyboard, int key) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_keyboard_press(keyboard, key);
+}
+
+bool HookKeyboardTrigger(void* keyboard, int key) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_keyboard_trigger(keyboard, key);
+}
+
+bool HookKeyboardRepeat(void* keyboard, int key) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_keyboard_repeat(keyboard, key);
+}
+
+bool HookKeyboardRelease(void* keyboard, int key) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_keyboard_release(keyboard, key);
+}
+
+bool HookMousePress(void* mouse, int button, int port) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_mouse_press(mouse, button, port);
+}
+
+bool HookMouseTrigger(void* mouse, int button, int port) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_mouse_trigger(mouse, button, port);
+}
+
+bool HookMouseRepeat(void* mouse, int button, int port) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_mouse_repeat(mouse, button, port);
+}
+
+bool HookMouseRelease(void* mouse, int button, int port) {
+    HookScope scope;
+    return InputCaptureActive() ? false : g_original_mouse_release(mouse, button, port);
+}
+
+LONG HookMouseAxisX(void* mouse, int port) {
+    HookScope scope;
+    return InputCaptureActive() ? 0 : g_original_mouse_axis_x(mouse, port);
+}
+
+LONG HookMouseAxisY(void* mouse, int port) {
+    HookScope scope;
+    return InputCaptureActive() ? 0 : g_original_mouse_axis_y(mouse, port);
+}
+
+void* HookPadRawData(void* pad) {
+    HookScope scope;
+    return InputCaptureActive()
+        ? static_cast<void*>(g_neutral_pad_data.data())
+        : g_original_pad_raw_data(pad);
+}
+
+void NeutralizeNmplPads() {
+    void* manager = g_pad_manager_get_instance();
+    if (manager == nullptr) return;
+
+    for (int index = 0; index < 4; ++index) {
+        void* pad = g_pad_manager_get_pad(manager, index);
+        if (!IsWritableAddress(pad, 0x26C)) continue;
+
+        g_pad_clear_buttons(pad, UINT64_MAX);
+        g_pad_stop_repeat(pad);
+        auto* bytes = reinterpret_cast<std::uint8_t*>(pad);
+        std::memset(bytes + 0x40, 0, 8);
+        std::memset(bytes + 0x258, 0, 0x14);
+    }
+}
+
+void HookNmplInputUpdate(float delta_time) {
+    HookScope scope;
+    g_original_nmpl_input_update(delta_time);
+    if (InputCaptureActive()) NeutralizeNmplPads();
+}
+
+struct NmplInputHookSpec {
+    const char* export_name;
+    void* detour;
+    void** original;
+    void* target = nullptr;
+};
+
+NmplInputHookSpec g_nmpl_input_hooks[] = {
+    {"?press@CKeyboard@Input@Nmpl@@QEAA_NH@Z", reinterpret_cast<void*>(&HookKeyboardPress),
+     reinterpret_cast<void**>(&g_original_keyboard_press)},
+    {"?trigger@CKeyboard@Input@Nmpl@@QEAA_NH@Z", reinterpret_cast<void*>(&HookKeyboardTrigger),
+     reinterpret_cast<void**>(&g_original_keyboard_trigger)},
+    {"?repeat@CKeyboard@Input@Nmpl@@QEAA_NH@Z", reinterpret_cast<void*>(&HookKeyboardRepeat),
+     reinterpret_cast<void**>(&g_original_keyboard_repeat)},
+    {"?release@CKeyboard@Input@Nmpl@@QEAA_NH@Z", reinterpret_cast<void*>(&HookKeyboardRelease),
+     reinterpret_cast<void**>(&g_original_keyboard_release)},
+    {"?isPress@CMouseWin@Input@Nmpl@@UEBA_NW4EMouseButton@CMouseBase@23@H@Z",
+     reinterpret_cast<void*>(&HookMousePress), reinterpret_cast<void**>(&g_original_mouse_press)},
+    {"?isTrigger@CMouseWin@Input@Nmpl@@UEBA_NW4EMouseButton@CMouseBase@23@H@Z",
+     reinterpret_cast<void*>(&HookMouseTrigger), reinterpret_cast<void**>(&g_original_mouse_trigger)},
+    {"?isRepeat@CMouseWin@Input@Nmpl@@UEBA_NW4EMouseButton@CMouseBase@23@H@Z",
+     reinterpret_cast<void*>(&HookMouseRepeat), reinterpret_cast<void**>(&g_original_mouse_repeat)},
+    {"?isRelease@CMouseWin@Input@Nmpl@@UEBA_NW4EMouseButton@CMouseBase@23@H@Z",
+     reinterpret_cast<void*>(&HookMouseRelease), reinterpret_cast<void**>(&g_original_mouse_release)},
+    {"?axisX@CMouseWin@Input@Nmpl@@UEBAJH@Z", reinterpret_cast<void*>(&HookMouseAxisX),
+     reinterpret_cast<void**>(&g_original_mouse_axis_x)},
+    {"?axisY@CMouseWin@Input@Nmpl@@UEBAJH@Z", reinterpret_cast<void*>(&HookMouseAxisY),
+     reinterpret_cast<void**>(&g_original_mouse_axis_y)},
+    {"?rawData@CPad@Input@Nmpl@@QEAAPEAXXZ", reinterpret_cast<void*>(&HookPadRawData),
+     reinterpret_cast<void**>(&g_original_pad_raw_data)},
+    {"?update@CNmplInput@Input@Nmpl@@SAXM@Z", reinterpret_cast<void*>(&HookNmplInputUpdate),
+     reinterpret_cast<void**>(&g_original_nmpl_input_update)},
+};
+
+void RemoveNmplInputHooks() {
+    for (auto& hook : g_nmpl_input_hooks) {
+        if (hook.target != nullptr) {
+            MH_RemoveHook(hook.target);
+            hook.target = nullptr;
+        }
+    }
+}
+
+bool CreateNmplInputHooks() {
+    HMODULE nmpl = GetModuleHandleW(L"NmplDLL.dll");
+    if (nmpl == nullptr) {
+        SetFailure(1606, "NmplDLL.dll is not loaded; exclusive input capture is unavailable");
+        return false;
+    }
+
+    g_pad_manager_get_instance = reinterpret_cast<PadManagerGetInstanceFn>(
+        reinterpret_cast<void*>(
+            GetProcAddress(nmpl, "?getInstance@CPadMgr@Input@Nmpl@@SAAEAV123@XZ")));
+    g_pad_manager_get_pad = reinterpret_cast<PadManagerGetPadFn>(
+        reinterpret_cast<void*>(
+            GetProcAddress(nmpl, "?pad@CPadMgr@Input@Nmpl@@QEAAAEAVCPad@23@H@Z")));
+    g_pad_clear_buttons = reinterpret_cast<PadClearButtonsFn>(
+        reinterpret_cast<void*>(
+            GetProcAddress(nmpl, "?clearBtn@CPad@Input@Nmpl@@QEAAX_K@Z")));
+    g_pad_stop_repeat = reinterpret_cast<PadStopRepeatFn>(
+        reinterpret_cast<void*>(
+            GetProcAddress(nmpl, "?reptStop@CPad@Input@Nmpl@@QEAAXXZ")));
+    if (g_pad_manager_get_instance == nullptr || g_pad_manager_get_pad == nullptr ||
+        g_pad_clear_buttons == nullptr || g_pad_stop_repeat == nullptr) {
+        SetFailure(1607, "A required Nmpl pad-control export was not found");
+        return false;
+    }
+
+    for (auto& hook : g_nmpl_input_hooks) {
+        hook.target = reinterpret_cast<void*>(GetProcAddress(nmpl, hook.export_name));
+        if (hook.target == nullptr) {
+            SetFailure(1607, "A required Nmpl input export was not found");
+            RemoveNmplInputHooks();
+            return false;
+        }
+    }
+
+    for (auto& hook : g_nmpl_input_hooks) {
+        if (MH_CreateHook(hook.target, hook.detour, hook.original) != MH_OK) {
+            SetFailure(1608, "Could not create an Nmpl exclusive-input hook");
+            RemoveNmplInputHooks();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool QueueEnableNmplInputHooks() {
+    for (const auto& hook : g_nmpl_input_hooks) {
+        if (hook.target == nullptr || MH_QueueEnableHook(hook.target) != MH_OK) return false;
+    }
+    return true;
+}
+
+void DisableNmplInputHooks() {
+    for (const auto& hook : g_nmpl_input_hooks) {
+        if (hook.target != nullptr) MH_DisableHook(hook.target);
+    }
 }
 
 void DestroyRenderer() {
@@ -551,6 +855,7 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableSetMousePos;
+    io.ConfigNavCaptureKeyboard = true;
 
     if (g_output_window != nullptr && g_original_wndproc == nullptr) {
         g_original_wndproc = reinterpret_cast<WNDPROC>(
@@ -607,25 +912,39 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
 void ScanAndDiscoverMods();
 
 void UpdateOverlayState() {
-    const bool was_visible = g_overlay_visible;
+    const bool was_visible = g_overlay_visible.load(std::memory_order_acquire);
     if (g_shared != nullptr && g_shared->open_request != 0) {
         g_shared->open_request = 0;
-        g_overlay_visible = true;
+        OpenOverlay();
     }
 
     if (ModMenuHotkeyKeyboardPressed() || ModMenuHotkeyGamepadPressed()) {
-        g_overlay_visible = !g_overlay_visible;
+        if (g_overlay_visible.load(std::memory_order_acquire)) {
+            CloseOverlay();
+        } else {
+            OpenOverlay();
+        }
     }
 
     const bool b_down = ControllerBDown();
     const bool escape_down = EscapeDown();
-    if (g_overlay_visible &&
+    if (g_overlay_visible.load(std::memory_order_acquire) &&
         ((b_down && !g_last_b_down) || (escape_down && !g_last_escape_down))) {
-        g_overlay_visible = false;
+        CloseOverlay();
     }
     g_last_b_down = b_down;
     g_last_escape_down = escape_down;
-    if (!was_visible && g_overlay_visible) ScanAndDiscoverMods();
+
+    if (!g_overlay_visible.load(std::memory_order_acquire) &&
+        g_waiting_for_back_release.load(std::memory_order_acquire) &&
+        !b_down && !escape_down && !ModMenuHotkeyKeyboardDown() &&
+        !ModMenuHotkeyGamepadDown()) {
+        g_waiting_for_back_release.store(false, std::memory_order_release);
+    }
+
+    if (!was_visible && g_overlay_visible.load(std::memory_order_acquire)) {
+        ScanAndDiscoverMods();
+    }
 }
 
 enum class OptionType {
@@ -985,41 +1304,75 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::GetBackgroundDrawList()->AddRectFilled(
         ImVec2(0.0f, 0.0f), display_size, IM_COL32(7, 5, 12, 175));
 
-    const float width = std::min(1080.0f, std::max(680.0f, display_size.x * 0.72f));
-    const float height = std::min(680.0f, std::max(460.0f, display_size.y * 0.76f));
+    const float ui_scale = std::clamp(
+        std::min(display_size.x / 1920.0f, display_size.y / 1080.0f), 0.78f, 1.60f);
+    const float margin = std::max(8.0f, 16.0f * ui_scale);
+    const float available_width = std::max(1.0f, display_size.x - margin * 2.0f);
+    const float available_height = std::max(1.0f, display_size.y - margin * 2.0f);
+    const float minimum_width = std::min(640.0f * ui_scale, available_width);
+    const float maximum_width = std::min(1440.0f * ui_scale, available_width);
+    const float minimum_height = std::min(480.0f * ui_scale, available_height);
+    const float maximum_height = std::min(840.0f * ui_scale, available_height);
+    const float width = std::clamp(display_size.x * 0.84f, minimum_width, maximum_width);
+    const float height = std::clamp(display_size.y * 0.82f, minimum_height, maximum_height);
+    const bool wide_layout = width >= 900.0f * ui_scale;
+
     ImGui::SetNextWindowPos(
         ImVec2((display_size.x - width) * 0.5f, (display_size.y - height) * 0.5f),
         ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
+    ImGui::SetNextWindowFocus();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22.0f * ui_scale, 18.0f * ui_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(9.0f * ui_scale, 9.0f * ui_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f * ui_scale, 5.0f * ui_scale));
     ImGui::Begin(
         "##DisgaeaMayhemModManager",
         nullptr,
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoSavedSettings);
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::SetWindowFontScale(ui_scale);
 
     // Header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::SetWindowFontScale(1.3f);
+    ImGui::SetWindowFontScale(ui_scale * 1.20f);
     ImGui::TextUnformatted("DISGAEA MAYHEM - MOD MANAGER (IN-GAME)");
-    ImGui::SetWindowFontScale(1.0f);
+    ImGui::SetWindowFontScale(ui_scale);
     ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::SetCursorPosX(width - 240.0f);
-    ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "DirectX 12 Engine: ATIVO");
+    const char* engine_status = "DirectX 12 Engine: ATIVO";
+    const float engine_status_width = ImGui::CalcTextSize(engine_status).x;
+    if (wide_layout) {
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(std::max(
+            ImGui::GetCursorPosX(), width - engine_status_width - 44.0f * ui_scale));
+    }
+    ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "%s", engine_status);
     ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::Dummy(ImVec2(0.0f, 2.0f * ui_scale));
 
-    // Two-column layout: Left = Mod Selector, Right = Mod Details & Dynamic Controls
-    const float left_width = 300.0f;
-    const float content_height = height - 120.0f;
+    // Responsive layout: side-by-side on wide viewports and stacked on narrow ones.
+    const float footer_height = wide_layout ? 40.0f * ui_scale : 76.0f * ui_scale;
+    const float content_height = std::max(
+        140.0f * ui_scale, ImGui::GetContentRegionAvail().y - footer_height);
+    const float row_height = 32.0f * ui_scale;
+    const float left_width = wide_layout
+        ? std::clamp(width * 0.29f, 220.0f * ui_scale, 360.0f * ui_scale)
+        : 0.0f;
+    const float list_height = wide_layout
+        ? content_height
+        : std::min(
+              content_height * 0.38f,
+              std::max(130.0f * ui_scale,
+                       (static_cast<float>(g_discovered_mods.size()) + 1.8f) * row_height));
     const bool is_left_focused = (g_gp_nav.active_panel == ActiveFocusPanel::LeftList);
 
     // --- Left Panel: Dynamic Mod List ---
     if (is_left_focused) {
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.74f, 0.20f, 0.95f));
     }
-    ImGui::BeginChild("##ModListPanel", ImVec2(left_width, content_height), true);
+    ImGui::BeginChild("##ModListPanel", ImVec2(left_width, list_height), true);
+    ImGui::SetWindowFontScale(ui_scale);
     if (is_left_focused) {
         ImGui::PopStyleColor();
         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "MODS DESCOBERTOS (%d) [FOCO: LISTA]", static_cast<int>(g_discovered_mods.size()));
@@ -1027,7 +1380,7 @@ void BuildOverlay(const ImVec2& display_size) {
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "MODS DESCOBERTOS (%d)", static_cast<int>(g_discovered_mods.size()));
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("🔄")) {
+    if (ImGui::SmallButton("Atualizar")) {
         ScanAndDiscoverMods();
     }
     ImGui::Separator();
@@ -1055,7 +1408,7 @@ void BuildOverlay(const ImVec2& display_size) {
             ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.35f, 0.25f, 0.12f, 0.95f));
         }
 
-        if (ImGui::Selectable(label, is_selected, 0, ImVec2(0, 32.0f))) {
+        if (ImGui::Selectable(label, is_selected, 0, ImVec2(0, row_height))) {
             g_selected_mod = static_cast<int>(i);
             g_gp_nav.active_panel = ActiveFocusPanel::LeftList;
         }
@@ -1069,14 +1422,25 @@ void BuildOverlay(const ImVec2& display_size) {
     }
     ImGui::EndChild();
 
-    ImGui::SameLine();
+    if (wide_layout) {
+        ImGui::SameLine();
+    } else {
+        ImGui::Dummy(ImVec2(0.0f, 3.0f * ui_scale));
+    }
 
     // --- Right Panel: Selected Mod Dynamic UI & Options ---
     const bool is_right_focused = (g_gp_nav.active_panel == ActiveFocusPanel::RightOptions);
     if (is_right_focused) {
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.74f, 0.20f, 0.95f));
     }
-    ImGui::BeginChild("##ModDetailsPanel", ImVec2(0.0f, content_height), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    const float details_height = wide_layout
+        ? content_height
+        : std::max(100.0f * ui_scale,
+                   content_height - list_height - 3.0f * ui_scale);
+    ImGui::BeginChild(
+        "##ModDetailsPanel", ImVec2(0.0f, details_height), true,
+        ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    ImGui::SetWindowFontScale(ui_scale);
     if (is_right_focused) {
         ImGui::PopStyleColor();
     }
@@ -1091,9 +1455,9 @@ void BuildOverlay(const ImVec2& display_size) {
         auto& mod = g_discovered_mods[g_selected_mod];
 
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.3f, 1.0f));
-        ImGui::SetWindowFontScale(1.15f);
+        ImGui::SetWindowFontScale(ui_scale * 1.15f);
         ImGui::TextWrapped("%s", mod.name);
-        ImGui::SetWindowFontScale(1.0f);
+        ImGui::SetWindowFontScale(ui_scale);
         ImGui::PopStyleColor();
 
         ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Categoria: %s", mod.category);
@@ -1132,7 +1496,9 @@ void BuildOverlay(const ImVec2& display_size) {
                 ImGui::PushStyleColor(ImGuiCol_Button, is_opt0_focused ? ImVec4(0.25f, 0.85f, 0.35f, 1.0f) : ImVec4(0.15f, 0.65f, 0.25f, 0.95f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.75f, 0.3f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.85f, 0.35f, 1.0f));
-                if (ImGui::Button(is_opt0_focused ? " > [ ATIVADO (ON) ] < " : "  [ ATIVADO (ON) ]  ", ImVec2(180, 34))) {
+                if (ImGui::Button(
+                        is_opt0_focused ? " > [ ATIVADO (ON) ] < " : "  [ ATIVADO (ON) ]  ",
+                        ImVec2(180.0f * ui_scale, 34.0f * ui_scale))) {
                     mod.enabled = false;
                     NotifyModToggle(mod);
                     g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
@@ -1143,7 +1509,9 @@ void BuildOverlay(const ImVec2& display_size) {
                 ImGui::PushStyleColor(ImGuiCol_Button, is_opt0_focused ? ImVec4(0.55f, 0.55f, 0.55f, 1.0f) : ImVec4(0.35f, 0.35f, 0.35f, 0.95f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
-                if (ImGui::Button(is_opt0_focused ? " > [ DESATIVADO (OFF) ] < " : "  [ DESATIVADO (OFF) ]  ", ImVec2(180, 34))) {
+                if (ImGui::Button(
+                        is_opt0_focused ? " > [ DESATIVADO (OFF) ] < " : "  [ DESATIVADO (OFF) ]  ",
+                        ImVec2(180.0f * ui_scale, 34.0f * ui_scale))) {
                     mod.enabled = true;
                     NotifyModToggle(mod);
                     g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
@@ -1167,7 +1535,7 @@ void BuildOverlay(const ImVec2& display_size) {
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.35f, 0.2f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.95f, 0.45f, 0.25f, 1.0f));
 
-            if (ImGui::Button(btn_lbl, ImVec2(180, 34))) {
+            if (ImGui::Button(btn_lbl, ImVec2(180.0f * ui_scale, 34.0f * ui_scale))) {
                 ExecuteModActionGeneric(mod);
                 g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                 g_gp_nav.focused_option = 0;
@@ -1178,7 +1546,7 @@ void BuildOverlay(const ImVec2& display_size) {
         // --- Dynamic Sub-Options / Sliders (Option Indices 1..N) ---
         if (!mod.options.empty()) {
             ImGui::Dummy(ImVec2(0.0f, 6.0f));
-            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "⚙️ Opcoes & Parametros:");
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Opcoes & Parametros:");
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
 
             for (size_t j = 0; j < mod.options.size(); ++j) {
@@ -1203,11 +1571,13 @@ void BuildOverlay(const ImVec2& display_size) {
                     }
                 } else if (opt.type == OptionType::SliderInt) {
                     if (is_cur_opt_focused) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ ◄ / ► para Ajustar ]", opt.name);
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ < / > para ajustar ]", opt.name);
                     } else {
                         ImGui::TextUnformatted(opt.name);
                     }
-                    ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
+                    ImGui::PushItemWidth(std::max(
+                        150.0f * ui_scale,
+                        ImGui::GetContentRegionAvail().x - 20.0f * ui_scale));
                     if (ImGui::SliderInt("##slider", &opt.int_val, opt.min_int, opt.max_int)) {
                         NotifyModOptionChanged(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
@@ -1216,11 +1586,13 @@ void BuildOverlay(const ImVec2& display_size) {
                     ImGui::PopItemWidth();
                 } else if (opt.type == OptionType::SliderFloat) {
                     if (is_cur_opt_focused) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ ◄ / ► para Ajustar ]", opt.name);
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ < / > para ajustar ]", opt.name);
                     } else {
                         ImGui::TextUnformatted(opt.name);
                     }
-                    ImGui::PushItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x - 20.0f));
+                    ImGui::PushItemWidth(std::max(
+                        150.0f * ui_scale,
+                        ImGui::GetContentRegionAvail().x - 20.0f * ui_scale));
                     if (ImGui::SliderFloat("##slider", &opt.float_val, opt.min_float, opt.max_float, "%.1f")) {
                         NotifyModOptionChanged(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
@@ -1260,50 +1632,26 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::EndChild();
 
     // Footer
-    const float prompt_y = height - 42.0f;
-    if (ImGui::GetCursorPosY() < prompt_y) {
-        ImGui::SetCursorPosY(prompt_y);
-    }
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("🎮 Atalho: Select / L3+R3 / F1");
+    if (wide_layout) {
+        ImGui::TextUnformatted(
+            "Abrir: Select / L3+R3 / F1  |  Painel: LB/RB  |  D-Pad: navegar  |  A: confirmar");
+    } else {
+        ImGui::TextWrapped("F1/Insert/Home ou Select/L3+R3: abrir e fechar");
+    }
     ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::TextUnformatted("| LB / RB:");
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("Painel");
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::TextUnformatted("| D-Pad:");
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("Navegar");
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::TextUnformatted("| ◄ / ►:");
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("Sliders");
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::TextUnformatted("| A:");
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    ImGui::TextUnformatted("Confirmar");
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
-    ImGui::TextUnformatted("|");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("✕ Voltar ao Jogo (B / Esc)")) {
-        g_overlay_visible = false;
+    if (wide_layout) ImGui::SameLine();
+    if (ImGui::SmallButton("Voltar ao jogo (B / Esc)")) {
+        CloseOverlay();
     }
     ImGui::End();
+    ImGui::PopStyleVar(3);
 }
 
 bool RenderFrame() {
     UpdateOverlayState();
-    if (!g_overlay_visible) {
+    if (!g_overlay_visible.load(std::memory_order_acquire)) {
         return true;
     }
 
@@ -1342,10 +1690,12 @@ bool RenderFrame() {
         io.DeltaTime = 1.0f / 60.0f;
     }
     g_last_counter = now;
-    io.MouseDrawCursor = g_overlay_visible;
+    io.MouseDrawCursor = true;
     UpdateGamepadIO(io.DeltaTime);
 
     ImGui_ImplDX12_NewFrame();
+    ImGui::SetNextFrameWantCaptureMouse(true);
+    ImGui::SetNextFrameWantCaptureKeyboard(true);
     ImGui::NewFrame();
     BuildOverlay(io.DisplaySize);
     ImGui::Render();
@@ -1527,7 +1877,12 @@ bool CreateHooks() {
         SetFailure(1601, "MinHook initialization failed");
         return false;
     }
+    if (!CreateNmplInputHooks()) {
+        MH_Uninitialize();
+        return false;
+    }
     if (!FindHookTargets()) {
+        RemoveNmplInputHooks();
         MH_Uninitialize();
         return false;
     }
@@ -1537,6 +1892,7 @@ bool CreateHooks() {
         reinterpret_cast<void**>(&g_original_present));
     if (status != MH_OK) {
         SetFailure(1602, "Could not create the IDXGISwapChain::Present hook");
+        RemoveNmplInputHooks();
         MH_Uninitialize();
         return false;
     }
@@ -1547,6 +1903,7 @@ bool CreateHooks() {
     if (status != MH_OK) {
         SetFailure(1603, "Could not create the IDXGISwapChain::ResizeBuffers hook");
         MH_RemoveHook(g_present_target);
+        RemoveNmplInputHooks();
         MH_Uninitialize();
         return false;
     }
@@ -1558,17 +1915,20 @@ bool CreateHooks() {
         SetFailure(1604, "Could not create the ID3D12CommandQueue::ExecuteCommandLists hook");
         MH_RemoveHook(g_resize_buffers_target);
         MH_RemoveHook(g_present_target);
+        RemoveNmplInputHooks();
         MH_Uninitialize();
         return false;
     }
-    if (MH_QueueEnableHook(g_present_target) != MH_OK ||
+    if (!QueueEnableNmplInputHooks() ||
+        MH_QueueEnableHook(g_present_target) != MH_OK ||
         MH_QueueEnableHook(g_resize_buffers_target) != MH_OK ||
         MH_QueueEnableHook(g_execute_target) != MH_OK ||
         MH_ApplyQueued() != MH_OK) {
-        SetFailure(1605, "Could not enable the DirectX 12 hooks");
+        SetFailure(1605, "Could not enable the DirectX 12 and exclusive-input hooks");
         MH_RemoveHook(g_execute_target);
         MH_RemoveHook(g_resize_buffers_target);
         MH_RemoveHook(g_present_target);
+        RemoveNmplInputHooks();
         MH_Uninitialize();
         return false;
     }
@@ -1586,6 +1946,7 @@ void RemoveHooks() {
     if (g_execute_target != nullptr) {
         MH_DisableHook(g_execute_target);
     }
+    DisableNmplInputHooks();
     for (int attempt = 0;
          attempt < 5000 && g_active_hooks.load(std::memory_order_acquire) != 0;
          ++attempt) {
@@ -1594,6 +1955,7 @@ void RemoveHooks() {
     MH_RemoveHook(g_execute_target);
     MH_RemoveHook(g_resize_buffers_target);
     MH_RemoveHook(g_present_target);
+    RemoveNmplInputHooks();
     MH_Uninitialize();
 }
 
@@ -1634,7 +1996,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
     g_hooks_installed.store(true, std::memory_order_release);
     SetStatus(STATUS_HOOKS_INSTALLED);
     if (g_loader_api != nullptr && g_loader_api->Log != nullptr) {
-        g_loader_api->Log("mod_menu", "Hooks DirectX 12 instalados.");
+        g_loader_api->Log("mod_menu", "Hooks DirectX 12 e captura exclusiva de input instalados.");
     }
     return TRUE;
 }
@@ -1662,10 +2024,6 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char*, const Dm
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     Mod_Disable();
     g_loader_api = nullptr;
-    if (g_hook_stub != nullptr) {
-        VirtualFree(g_hook_stub, 0, MEM_RELEASE);
-        g_hook_stub = nullptr;
-    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {

@@ -154,6 +154,8 @@ foreach ($deployment in $deployments) {
 if ($LASTEXITCODE -ne 0) { throw "Validador do Mod Loader falhou com codigo $LASTEXITCODE" }
 
 Copy-Item -LiteralPath $loaderOutput -Destination (Join-Path $smokeRoot 'dxgi.dll') -Force
+Copy-Item -LiteralPath (Join-Path $gameRoot 'NmplDLL.dll') `
+    -Destination (Join-Path $smokeRoot 'NmplDLL.dll') -Force
 Copy-Item -LiteralPath $menuOutput -Destination (Join-Path $smokeRoot 'mods\mod_menu\mod_menu.dll') -Force
 Copy-Item -LiteralPath (Join-Path $gameRoot 'mods\mod_menu\mod.json') `
     -Destination (Join-Path $smokeRoot 'mods\mod_menu\mod.json') -Force

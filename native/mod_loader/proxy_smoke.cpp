@@ -9,6 +9,12 @@
 using CreateFactoryFn = HRESULT(WINAPI*)(REFIID, void**);
 
 int main() {
+    HMODULE nmpl = LoadLibraryW(L"NmplDLL.dll");
+    if (nmpl == nullptr) {
+        std::fprintf(stderr, "LoadLibrary(NmplDLL.dll) falhou: %lu\n", GetLastError());
+        return 9;
+    }
+
     HMODULE proxy = LoadLibraryW(L"dxgi.dll");
     if (proxy == nullptr) {
         std::fprintf(stderr, "LoadLibrary(dxgi.dll) falhou: %lu\n", GetLastError());

@@ -27,8 +27,9 @@ O objeto `CCharacterWorldInformation` é alocado na Heap (`0x27D...`) ao entrar 
 | `+0x00` | `void*` | Ponteiro para VTable `0x140A57610` (RVA `0xA57610`) |
 | `+0x08` | `uint32_t` | Contador Atômico de Referências (`intrusive_ptr`) |
 | `+0x50` | `int32_t` | Quantidade de Dados Disponíveis |
-| `+0x174` | `int32_t` | Energia Máxima do Tabuleiro (Padrão: 100) |
-| `+0x178` | `int32_t` | **Energia Atual do Jogador (Master Logic Energy / Turnos Restantes)** |
+| `+0x170` | subobjeto | Valor limitado de energia; começa pela VTable `0x140A1A7B0` |
+| `+0x174` | — | Metade superior do ponteiro da VTable em `+0x170`; **não é um campo gravável** |
+| `+0x178` | `int32_t` | **Energia atual do jogador (turnos restantes)** |
 | `+0x1A0` | `int32_t` | Total de Passos Efetuados na Partida |
 | `+0x1B8` | `int32_t` | Multiplicador de Recompensas do Tabuleiro |
 
@@ -59,18 +60,45 @@ A engine realiza verificações de thresholds de energia nas seguintes instruç�
 0x140461EC7: 83 B8 78 01 00 00 02    cmp DWORD PTR [rax+0x178], 2    ; Alerta Final (<= 2)
 ```
 
+O limite superior não fica em `+0x174`. O terceiro slot da VTable do subobjeto
+de energia aponta para `0x1401A0120`, cuja implementação retorna `100`. A rotina
+de resolução de turno começa em RVA `0x00461CA0`; nela:
+
+```x86asm
+0x140461DF3: mov rdi, [rsi+0x200]  ; CCharacterWorldInformation
+0x140461DFA: add rdi, 0x170        ; subobjeto de energia
+0x140461E01: mov eax, [rsi+0x298]  ; variação do turno
+0x140461E07: add [rdi+0x08], eax   ; altera CCharacterWorldInformation+0x178
+```
+
+Depois da soma, a própria engine limita o valor pelos métodos virtuais do
+subobjeto.
+
 ---
 
 ## ⚡ 5. Implementação do Mod (`chara_world.dll`)
 
-* **Mecanismo:** Hook residente em segundo plano que localiza as instâncias ativas de `CCharacterWorldInformation` (VTable `0x140A57610`) e `CUIUnion_CharacterWorld_Energy` (VTable `0x140A71728`) via varredura por assinatura de VTable na RAM.
-* **Trava:** Mantém a energia do jogador congelada em 100/100 (ou no valor configurado pelo slider do menu) a cada 80ms, permitindo turnos e passos infinitos.
+* **Mecanismo:** MinHook síncrono na resolução de turno, RVA `0x00461CA0`.
+* **Trava:** valida `task+0x200`, a VTable de `CCharacterWorldInformation` e a
+  VTable do subobjeto em `+0x170`; então escreve exclusivamente em `+0x178`
+  antes e depois da rotina nativa.
+* **Ciclo de vida:** não existe worker, polling, varredura de heap nem ponteiro de
+  instância em cache.
+* **Compatibilidade:** fingerprint PE e prólogo exato são obrigatórios. Uma build
+  divergente é rejeitada.
 
-### Construtor validado
+### Rotina validada
 
-- `CCharacterWorldInformation::CCharacterWorldInformation`: RVA `0x004501D0` (VA `0x1404501D0`).
-- Prólogo esperado: `48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57`.
-- A escrita da VTable `0x140A57610` ocorre em `0x1404501FF`.
-- Assinatura observada no ABI x64: `void* (this, constructor_arg, allocator_arg)`, em `RCX`, `RDX` e `R8`.
+- Resolução de turno: RVA `0x00461CA0` (VA preferencial `0x140461CA0`).
+- Prólogo esperado: `48 8B C4 48 89 58 10 48 89 70 18 55 57 41 54 41`.
+- Assinatura observada no ABI x64: `bool (task)`, com `task` em `RCX`.
 
-O plugin valida o prólogo antes de instalar MinHook e confirma a VTable do objeto retornado antes de armazenar a instância. Uma build divergente é rejeitada.
+### Causa do crash da implementação anterior
+
+A implementação anterior escrevia `100` em `+0x174` supondo que o campo fosse
+"energia máxima". Isso substituía os quatro bytes superiores da VTable
+`0x0000000140A1A7B0` por `0x00000064`, produzindo o ponteiro inválido
+`0x0000006440A1A7B0`. O próximo chamado virtual do subobjeto causava o crash ao
+entrar no Chara World. O worker ainda mantinha um ponteiro sem propriedade para
+uma instância que podia ser destruída durante a troca de mapa. Ambos os caminhos
+foram removidos.
