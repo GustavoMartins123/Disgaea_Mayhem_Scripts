@@ -1,37 +1,23 @@
-# Cheat Shop - Limite de 5000%
+# Cheat Shop - Valores em 5000%
 
-Action nativa ABI v1 que modifica o banco usado pelo Cheat Shop antes da leitura
-normal do jogo. O executável localiza a instalação relativamente à própria pasta
-e nunca contém caminhos absolutos.
+Enquanto este mod estiver ativado, os cinco valores principais da Cheat Shop
+ficam em `5000%`:
 
-## Campos alterados
+- EXP;
+- Mana;
+- HL;
+- Weapon Mastery;
+- Item Drops.
 
-- EXP
-- Mana
-- HL
-- Weapon Mastery
-- Item Drops
+O mod não altera `data/database/cheatSetting.dat`. Os valores anteriores ficam
+guardados em memória e são restaurados quando o mod é desativado.
+Se a tela da Cheat Shop já estiver aberta, a cópia mostrada na lista também é
+atualizada imediatamente.
 
-Cada registro mantém os valores nativos de base `100`, passo `90` e demais
-campos. Somente o máximo `500` é substituído por `5000`.
+Durante a leitura do save, o mod espera o jogo terminar e então aplica `5000%`.
+Durante a gravação, entrega os valores anteriores ao jogo e reaplica `5000%`
+somente depois. Assim, a alteração não fica gravada no save.
 
-O patcher exige o tamanho e a sequência estrutural confirmados da versão atual.
-Ele valida IDs únicos, ordem, campos adjacentes e IDs numéricos antes de criar um
-arquivo temporário. A substituição do banco é atômica. Uma estrutura divergente
-retorna erro e não altera o arquivo.
-
-Execuções repetidas são idempotentes: um máximo já igual a `5000` é aceito como
-o estado canônico.
-
-## Códigos de saída
-
-- `1`: caminho do próprio executável indisponível;
-- `2`: raiz do jogo inválida;
-- `3`: banco ausente ou ilegível;
-- `4`: schema/fingerprint estrutural divergente;
-- `5`: falha na gravação ou substituição atômica;
-- `6`: verificação final divergente.
-
-Quando executada pelo loader durante o bootstrap, a alteração vale para a carga
-daquela inicialização. Se o botão for usado depois que o Cheat Shop já estiver
-aberto, reinicie o jogo para que o banco seja carregado novamente.
+O plugin aceita somente a versão verificada do executável e os cinco registros
+esperados da Cheat Shop. Se algum deles não corresponder, nenhum valor é
+alterado.

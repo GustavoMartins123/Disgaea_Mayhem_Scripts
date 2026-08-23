@@ -4,6 +4,6 @@
   "options": {
     "locked_energy": 100,
     "freeze_energy": true,
-    "tile_status_multiplier": 1.0
+    "tile_status_multiplier": 20
   }
 }

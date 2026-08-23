@@ -13,7 +13,7 @@
 
 namespace {
 
-constexpr std::uintptr_t kVoteUpdateRva = 0x004D19E0;
+constexpr std::uintptr_t kVoteUpdateRva = 0x004D2150;
 constexpr std::uintptr_t kVoteStateVtableRva = 0x00A59850;
 constexpr std::uintptr_t kVoteTaskVtableRva = 0x00A59960;
 constexpr std::size_t kTaskPointerOffset = 0x200;
@@ -129,8 +129,8 @@ bool HookVoteUpdate(void* state, const void* update_info) {
 
 bool InstallHook() {
     static const std::uint8_t expected_prologue[] = {
-        0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48,
-        0x89, 0x70, 0x18, 0x48, 0x89, 0x78, 0x20, 0x55
+        0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x18, 0x55,
+        0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56
     };
     g_hook_target = reinterpret_cast<void*>(g_exe_base + kVoteUpdateRva);
     if (!IsAccessibleRange(g_hook_target, sizeof(expected_prologue), false) ||

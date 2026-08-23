@@ -99,7 +99,7 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 - `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
 - `safe_backup`: uma unica worker, evento de parada e backups dentro da pasta do mod.
 - `item_world`: multiplica separadamente os pontos de nível e os Item Points. Os demais resultados continuam sob controle do jogo.
-- `cheat_shop`: action nativa estrita que valida o schema e expande atomicamente os cinco limites de porcentagem para 5000.
+- `cheat_shop`: toggle residente que mantém os cinco valores em 5000 e restaura os anteriores ao ser desativado, sem alterar o banco local ou o save.
 - `dark_assembly`: toggle residente que garante a aprovação em memória e não altera `wish.dat`.
 - `dlc_unlocker`: action nativa com executável e estado final declarados.
 

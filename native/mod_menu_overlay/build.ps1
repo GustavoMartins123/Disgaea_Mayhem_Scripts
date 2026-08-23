@@ -113,10 +113,12 @@ $modMenuInstallerOutput = Join-Path $buildRoot 'INSTALAR_MOD_MENU.exe'
     (Join-Path $gameRoot 'mods\mod_menu\INSTALAR_MOD_MENU.cpp') -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular INSTALAR_MOD_MENU.exe' }
 
-$cheatShopOutput = Join-Path $buildRoot 'APLICAR_MOD_CHEAT_SHOP.exe'
-& $gxx @cppFlags -municode -static -o $cheatShopOutput `
-    (Join-Path $gameRoot 'mods\cheat_shop\apply_cheat_shop.cpp') -lkernel32
-if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_CHEAT_SHOP.exe' }
+$cheatShopObject = Compile-CppObject `
+    (Join-Path $gameRoot 'mods\cheat_shop\cheat_shop.cpp') $pluginObjectRoot
+$cheatShopOutput = Join-Path $buildRoot 'cheat_shop.dll'
+& $gxx -shared -static-libgcc -static-libstdc++ -o $cheatShopOutput `
+    $cheatShopObject @pluginMinHookObjects -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular cheat_shop.dll' }
 
 $darkAssemblyObject = Compile-CppObject `
     (Join-Path $gameRoot 'mods\dark_assembly\dark_assembly.cpp') $pluginObjectRoot
@@ -138,7 +140,7 @@ $deployments = @(
     @($charaWorldOutput, (Join-Path $target 'mods\chara_world\chara_world.dll')),
     @($safeBackupOutput, (Join-Path $target 'mods\safe_backup\safe_backup.dll')),
     @($modMenuInstallerOutput, (Join-Path $target 'mods\mod_menu\INSTALAR_MOD_MENU.exe')),
-    @($cheatShopOutput, (Join-Path $target 'mods\cheat_shop\APLICAR_MOD_CHEAT_SHOP.exe')),
+    @($cheatShopOutput, (Join-Path $target 'mods\cheat_shop\cheat_shop.dll')),
     @($darkAssemblyOutput, (Join-Path $target 'mods\dark_assembly\dark_assembly.dll')),
     @($dlcUnlockerOutput, (Join-Path $target 'mods\dlc_unlocker\APLICAR_MOD_DLC.exe'))
 )

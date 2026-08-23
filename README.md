@@ -36,7 +36,7 @@ O rotulo integrado ao Main Menu ainda depende de um gravador NMPLTEX/YKCMP. O in
 - `chara_world`: energia configurável e multiplicador dos atributos ganhos nos tiles.
 - `safe_backup`: toggle residente com worker controlada pelo ciclo de vida.
 - `item_world`: multiplicadores separados de nível e Item Points.
-- `cheat_shop`: confirma e aplica os cinco limites de `5000%`.
+- `cheat_shop`: mantém os cinco valores principais em `5000%` enquanto estiver ativo.
 - `dark_assembly`: aprovação garantida em memória, sem substituir `wish.dat`.
 - `dlc_unlocker`: action nativa com executável explícito.
 

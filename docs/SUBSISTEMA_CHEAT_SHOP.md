@@ -1,71 +1,64 @@
 # Subsistema: Cheat Shop
 
-## Registro nativo
+## Valores principais
 
-O executável contém o caminho `data/database/cheatSetting.dat` na VA preferencial
-`0x1409F68E0`. A referência em `0x14002FB14` encaminha esse banco para a rotina
-de registro em `0x14079F570`.
+A Cheat Shop mantém cinco controles de porcentagem:
 
-Também estão presentes os RTTIs/templates de `CheatSettingData`, incluindo
-`Ngf::CDatabase<CheatSettingData>` e o vetor de
-`CheatSettingData::ItemInfo`.
+| ID | Controle |
+| ---: | --- |
+| `10101` | EXP |
+| `10102` | Mana |
+| `10103` | HL |
+| `10104` | Weapon Mastery |
+| `10105` | Item Drops |
 
-Para a build analisada, o banco possui `68279` bytes. Cada um dos cinco primeiros
-registros de porcentagem termina com a sequência estrutural:
+Cada controle usa um objeto `CCheatData_Gauge`. O valor atual fica em `+0x28`,
+o limite inferior em `+0x30` e o limite superior em `+0x34`.
 
-```text
-enabled/default marker = 1
-base percentage        = 100
-step/cost field        = 90
-maximum percentage     = 500
-reserved[7]            = 0
-next numeric ID
-```
+`CCheatInformation` guarda esses objetos no mapa em `+0x68`. Na versão
+verificada, o mapa também contém os controles `20102` e `20103`, que não são
+alterados pelo mod.
 
-## Registros e offsets confirmados
+## Motivo da falha anterior
 
-| Registro | String no arquivo | Offset do máximo | Máximo original | Máximo do mod |
-| --- | --- | ---: | ---: | ---: |
-| EXP | `CHEAT_SETTING_EXP` | `0x0B1B` | `500` | `5000` |
-| Mana | `CHEAT_SETTING_MANA` | `0x17E2` | `500` | `5000` |
-| HL | `CHEAT_SETTING_HL` | `0x24C2` | `500` | `5000` |
-| Weapon Mastery | `CHEAT_SETTING_WM` | `0x30C8` | `500` | `5000` |
-| Item Drops | `CHEAT_SETTING_ITEM_DROPS` | `0x3C00` | `500` | `5000` |
+O patch anterior alterava cinco campos de `data/database/cheatSetting.dat` de
+`500` para `5000`. O jogo lia esses campos, mas depois carregava do save um
+limite separado para cada controle.
 
-O registro seguinte, `CHEAT_SETTING_ENEMY_LV`, é usado como limite estrutural do
-último registro modificado e não tem seu próprio máximo alterado.
+O `500` desse arquivo é um valor-base do banco. Ele não representa o limite
+atual da partida e não substitui os valores do save.
 
-## Diagnóstico da versão antiga
+Na sessão analisada, os registros do banco estavam em `5000`, porém os cinco
+controles em memória continuavam limitados a `1100`. Os valores mostrados na
+tela eram `720`, `100`, `80`, `100` e `100`. Esses valores e o limite carregado
+do save são o estado que o plugin guarda e restaura. Por isso a ação antiga
+terminava com sucesso sem produzir o resultado esperado.
 
-O `cheatSetting.dat` antigo da pasta do mod tinha somente quatro bytes diferentes
-do banco original:
+## Funcionamento atual
 
-- `0x30C8`: Weapon Mastery, `500 -> 5000`;
-- `0x3C00`: Item Drops, `500 -> 5000`.
+O mod é um plugin ativável. Depois que a Cheat Shop e o save são carregados, ele
+confirma os IDs dos cinco controles e mantém o valor atual e o limite superior
+em `5000`.
 
-EXP, Mana e HL nunca foram modificados, embora o manifesto prometesse os cinco
-efeitos. A cópia cega também não verificava versão, schema ou se o banco havia
-sido carregado antes da action.
+Ao desativar, os valores anteriores são restaurados. Durante uma gravação, o
+plugin entrega os valores anteriores ao jogo e reaplica `5000` somente depois.
+O banco `cheatSetting.dat` e o save permanecem sem a alteração do mod.
 
-## Patcher 2.0
+A tela mantém uma segunda cópia dos valores em objetos `CListItemData_Cheat`.
+O plugin acompanha a criação desses itens e atualiza essa cópia junto com os
+controles principais. Assim, ativar ou desativar o mod também muda uma tela que
+já esteja aberta.
 
-`APLICAR_MOD_CHEAT_SHOP.exe` não contém uma cópia alternativa do banco. Ele:
+Se a versão do jogo, a lista de controles ou os registros não corresponderem ao
+que foi verificado, o plugin não altera nenhum valor.
 
-1. descobre a raiz do jogo relativamente ao próprio executável;
-2. exige o tamanho exato da build documentada;
-3. localiza uma única ocorrência de cada ID e valida a ordem;
-4. valida campos adjacentes e o ID numérico do próximo registro;
-5. aceita somente o máximo original `500` ou o estado canônico `5000`;
-6. altera os cinco máximos em RAM;
-7. grava `cheatSetting.dat.tmp`, força o flush e substitui o banco atomicamente;
-8. relê o arquivo e exige igualdade byte a byte.
+## Pontos confirmados
 
-Qualquer divergência encerra a action com erro antes de substituir o banco. Não
-há busca por outro arquivo, cópia de backup ou compatibilidade silenciosa com
-outro schema.
-
-## Confirmação no Mod Menu
-
-Depois da execução, o loader mostra quais cinco limites foram confirmados em
-`5000%`. A indicação `[OK]` e essa mensagem vêm somente depois da releitura do
-arquivo e da comparação final.
+| Uso | RVA |
+| --- | ---: |
+| criação da lista da Cheat Shop | `0x001B3920` |
+| leitura e gravação de cada controle | `0x001B0500` |
+| criação dos itens mostrados na lista | `0x00543610` |
+| VTable de `CCheatInformation` | `0x00A25B60` |
+| VTable de `CCheatData_Gauge` | `0x00A25B70` |
+| VTable de `CListItemData_Cheat` | `0x00A67950` |

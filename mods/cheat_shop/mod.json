@@ -1,16 +1,15 @@
 {
   "schema_version": 1,
   "id": "cheat_shop_expander",
-  "name": "Cheat Shop - Limite de 5000%",
+  "name": "Cheat Shop - Valores em 5000%",
   "category": "Balanceamento & Trapaças",
-  "version": "2.1.0",
+  "version": "3.1.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Expande para 5000% os limites de EXP, Mana, HL, Weapon Mastery e Item Drops no banco nativo do Cheat Shop.",
-  "type": "action",
+  "description": "Mantém EXP, Mana, HL, Weapon Mastery e Item Drops em 5000% enquanto estiver ativo, sem alterar o banco local.",
+  "type": "toggle",
   "load_order": 200,
-  "auto_apply": true,
-  "action_label": "Aplicar 5000%",
-  "success_status": "Confirmado: EXP, Mana, HL, Weapon Mastery e Item Drops aceitam até 5000%.",
-  "executable": "APLICAR_MOD_CHEAT_SHOP.exe",
-  "components": "patcher nativo estrito de data/database/cheatSetting.dat"
+  "plugin": "cheat_shop.dll",
+  "components": [
+    "mods/cheat_shop/cheat_shop.dll"
+  ]
 }

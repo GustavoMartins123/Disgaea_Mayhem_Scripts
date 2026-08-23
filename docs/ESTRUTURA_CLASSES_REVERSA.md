@@ -10,8 +10,8 @@
    progressão de nível por derrotas, Item Points e offsets confirmados.
 3. [SUBSISTEMA_CHARA_WORLD.md](SUBSISTEMA_CHARA_WORLD.md): energia, lógica/UI e
    pontos de hook do Chara World.
-4. [SUBSISTEMA_CHEAT_SHOP.md](SUBSISTEMA_CHEAT_SHOP.md): schema do banco,
-   offsets dos limites e patch transacional do Cheat Shop.
+4. [SUBSISTEMA_CHEAT_SHOP.md](SUBSISTEMA_CHEAT_SHOP.md): controles, limites e
+   aplicação temporária dos valores da Cheat Shop.
 5. [SUBSISTEMA_DARK_ASSEMBLY.md](SUBSISTEMA_DARK_ASSEMBLY.md): decisão das
    votações e aprovação temporária em memória.
 
@@ -31,6 +31,9 @@
 | `CUIUnion_CharacterWorldBattle_Energy` | `0x140A710F8` | `0xA710F8` | `0xCF94F8` | UI de energia em batalha |
 | `CTask_CharacterWorldGame_Move` | `0x140A53D88` | `0xA53D88` | `0xCE1FB0` | Movimento no Chara World |
 | `CTask_CharacterWorldGame_TurnStart` | `0x140A52E18` | `0xA52E18` | `0xCE0780` | Início de turno no Chara World |
+| `CCheatInformation` | `0x140A25B60` | `0xA25B60` | `0xCA3098` | Lista de controles da Cheat Shop |
+| `CCheatData_Gauge` | `0x140A25B70` | `0xA25B70` | `0xCB3838` | Valor e limites de um controle da Cheat Shop |
+| `CListItemData_Cheat` | `0x140A67950` | `0xA67950` | `0xCEF620` | Cópia mostrada na lista da Cheat Shop |
 | `CTask_Vote_Voting` | `0x140A59960` | `0xA59960` | `0xCE7EB8` | Dados e resultado da votação |
 | `CState_Vote@CTask_Vote_Voting` | `0x140A59850` | `0xA59850` | `0xCE7D58` | Estado da votação |
 

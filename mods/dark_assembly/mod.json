@@ -3,7 +3,7 @@
   "id": "dark_assembly_approval",
   "name": "Dark Assembly - Aprovação Garantida",
   "category": "Qualidade de Vida (QoL)",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "Disgaea Mayhem Mod Team",
   "description": "Garante a aprovação das propostas enquanto estiver ativo, sem modificar o banco local.",
   "type": "toggle",
