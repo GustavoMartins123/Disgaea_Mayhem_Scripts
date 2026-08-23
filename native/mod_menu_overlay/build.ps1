@@ -90,16 +90,17 @@ $smokeOutput = Join-Path $smokeRoot 'mod_loader_proxy_smoke.exe'
 & $gxx @cppFlags -static -o $smokeOutput (Join-Path $loaderProject 'proxy_smoke.cpp') -lole32 -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_loader_proxy_smoke.exe' }
 
+$pluginMinHookObjects = [System.Collections.Generic.List[string]]::new()
+foreach ($source in $minHookSources) { $pluginMinHookObjects.Add((Compile-CObject $source $pluginObjectRoot)) }
+
+$itemObject = Compile-CppObject (Join-Path $gameRoot 'mods\item_world\item_world.cpp') $pluginObjectRoot
 $itemWorldOutput = Join-Path $buildRoot 'item_world.dll'
-& $gxx @cppFlags -shared -static-libgcc -static-libstdc++ -o $itemWorldOutput `
-    (Join-Path $gameRoot 'mods\item_world\item_world.cpp') -lkernel32
+& $gxx -shared -static-libgcc -static-libstdc++ -o $itemWorldOutput $itemObject @pluginMinHookObjects -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular item_world.dll' }
 
-$charaMinHookObjects = [System.Collections.Generic.List[string]]::new()
-foreach ($source in $minHookSources) { $charaMinHookObjects.Add((Compile-CObject $source $pluginObjectRoot)) }
 $charaObject = Compile-CppObject (Join-Path $gameRoot 'mods\chara_world\chara_world.cpp') $pluginObjectRoot
 $charaWorldOutput = Join-Path $buildRoot 'chara_world.dll'
-& $gxx -shared -static-libgcc -static-libstdc++ -o $charaWorldOutput $charaObject @charaMinHookObjects -lkernel32
+& $gxx -shared -static-libgcc -static-libstdc++ -o $charaWorldOutput $charaObject @pluginMinHookObjects -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular chara_world.dll' }
 
 $safeBackupOutput = Join-Path $buildRoot 'safe_backup.dll'
@@ -113,7 +114,7 @@ $modMenuInstallerOutput = Join-Path $buildRoot 'INSTALAR_MOD_MENU.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular INSTALAR_MOD_MENU.exe' }
 
 $cheatShopOutput = Join-Path $buildRoot 'APLICAR_MOD_CHEAT_SHOP.exe'
-& $gxx @cppFlags -static -o $cheatShopOutput `
+& $gxx @cppFlags -municode -static -o $cheatShopOutput `
     (Join-Path $gameRoot 'mods\cheat_shop\apply_cheat_shop.cpp') -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_CHEAT_SHOP.exe' }
 

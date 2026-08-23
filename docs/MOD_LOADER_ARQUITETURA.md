@@ -94,8 +94,9 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 - `mod_menu`: system mod ABI v1; nao gerencia DLLs.
 - `chara_world`: usa o construtor validado no RVA `0x004501D0`, com preflight do prologo; MinHook e criado em `Mod_Initialize`, a worker nasce em `Mod_Enable` e `DllMain` e passivo.
 - `safe_backup`: uma unica worker, evento de parada e backups dentro da pasta do mod.
-- `item_world`: o codigo anterior nunca preenchia `g_cached_item_world`. O plugin agora rejeita `Mod_Initialize` e registra o motivo. Ele so deve ser reativado depois que um hook validado capturar `CItemWorldData`; `mystery_room_rate` tambem nao esta implementado.
-- `cheat_shop`, `dark_assembly` e `dlc_unlocker`: actions nativas com executavel declarado.
+- `item_world`: plugin MinHook no RVA `0x001D77E0`; valida fingerprint/prologo, multiplica `CItemWorldData+0x68` e preserva o restante do fluxo nativo. Nao usa polling.
+- `cheat_shop`: action nativa estrita que valida o schema e expande atomicamente os cinco limites de porcentagem para 5000.
+- `dark_assembly` e `dlc_unlocker`: actions nativas com executavel declarado.
 
 Os arquivos `data/script/*.lub` sao artefatos Lua compilados da engine. Nao existem fontes `.lua` de mods neste repositorio e o loader nao anuncia um runtime Lua inexistente.
 

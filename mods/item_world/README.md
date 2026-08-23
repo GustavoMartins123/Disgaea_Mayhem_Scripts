@@ -1,21 +1,30 @@
-# Item World
+# Item World - Multiplicador de EXP de Nível
 
-Plugin nativo planejado para multiplicar niveis e subjugar Inocentes no Item World.
+Plugin residente ABI v1 que altera somente a progressão nativa de nível dos
+itens. O jogo acumula pontos por inimigo em `CItemWorldData + 0x68` e converte
+esses pontos em `CItemStatus.lv_` na aplicação das recompensas.
 
-## Estado real
+## Ciclo de vida
 
-O codigo atual conhece os layouts de `CItemWorldData` e `CItemStatus`, mas ainda nao possui um hook validado que capture a instancia ativa de `CItemWorldData`. A variavel `g_cached_item_world` nunca era preenchida; por isso a versao anterior podia aparecer como ativa sem alterar o jogo.
+- `Mod_Initialize` valida o fingerprint PE e o prólogo do RVA `0x1D77E0` antes
+  de instalar o MinHook.
+- `Mod_Enable` ativa o multiplicador configurado.
+- `Mod_Disable` volta imediatamente ao cálculo original.
+- `Mod_Shutdown` remove o hook e libera o MinHook.
 
-Na ABI v1, `Mod_Initialize` retorna falha explicitamente e o loader mostra o erro. Nao use injecao manual para contornar essa validacao.
+O hook multiplica temporariamente os pontos entregues à função nativa. Depois da
+aplicação, o valor transitório é restaurado. Os contadores de chefes em
+`+0x70/+0x74/+0x78`, Item Points e o recálculo de atributos permanecem sob
+controle do jogo.
 
-Os valores planejados permanecem em `config.json`, separados das definicoes e limites de `mod.json`. Isso nao habilita o mod enquanto o hook obrigatorio estiver ausente.
+Não há polling, escrita em `+0x74`, subjugação automática de Inocentes nem opção
+de Mystery Rooms. Esses comportamentos antigos não possuíam implementação
+validada e foram removidos.
 
-Para concluir o mod e necessario:
+Compatibilidade confirmada para o executável com SHA-256:
 
-1. identificar e validar o construtor/factory ou um metodo estavel que receba `CItemWorldData*`;
-2. instalar o hook em `Mod_Initialize` fora de `DllMain`;
-3. limpar a referencia ao destruir/sair da sessao;
-4. implementar ou remover a opcao `mystery_room_rate`;
-5. somente entao permitir `Mod_Enable`.
+```text
+13988368F66ADE40205C1D0D18157B6AE2D7736D67AC0C8734FE1DD4E62D5B41
+```
 
-Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` e `docs/MOD_LOADER_ARQUITETURA.md`.
+Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` para o fluxo desmontado.

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "item_world",
-  "name": "Item World - Multiplicador de Nível & Inocentes",
+  "name": "Item World - Multiplicador de EXP de Nível",
   "category": "Item World",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Acelera a evolução no Mundo dos Itens. Quando ativado (ON), o hook residente em memória intercepta a conclusão de cada andar multiplicando o ganho de níveis e subjugando 100% dos Inocentes automaticamente.",
+  "description": "Multiplica os pontos nativos obtidos ao derrotar inimigos no Item World, preservando os limites, recompensas de chefes e recálculo do jogo.",
   "type": "toggle",
   "load_order": 110,
   "plugin": "item_world.dll",
@@ -14,23 +14,11 @@
   ],
   "options": [
     {
-      "id": "levels_per_floor",
-      "name": "Níveis de Equipamento por Andar (+Lv)",
-      "type": "slider_int",
-      "min": 1,
-      "max": 10
-    },
-    {
-      "id": "auto_subdue",
-      "name": "Subjugar Inocentes Automaticamente (100%)",
-      "type": "toggle"
-    },
-    {
-      "id": "mystery_room_rate",
-      "name": "Taxa de Spawn de Mystery Rooms (%)",
-      "type": "slider_int",
-      "min": 10,
-      "max": 100
+      "id": "level_exp_multiplier",
+      "name": "Multiplicador de EXP de Nível",
+      "type": "slider_float",
+      "min": 1.0,
+      "max": 20.0
     }
   ]
 }
