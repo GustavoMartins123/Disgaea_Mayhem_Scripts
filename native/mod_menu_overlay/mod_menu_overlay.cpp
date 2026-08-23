@@ -18,145 +18,7 @@
 #include "MinHook.h"
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
-
-// -----------------------------------------------------------------------------
-// DXGI System Proxy Forwarder
-// -----------------------------------------------------------------------------
-namespace ProxyDXGI {
-
-static HMODULE g_real_dxgi = nullptr;
-
-inline void EnsureRealDxgiLoaded() {
-    if (g_real_dxgi != nullptr) {
-        return;
-    }
-    wchar_t sys_path[MAX_PATH] = {};
-    GetSystemDirectoryW(sys_path, MAX_PATH);
-    lstrcatW(sys_path, L"\\dxgi.dll");
-    g_real_dxgi = LoadLibraryW(sys_path);
-}
-
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-
-template <typename T>
-T GetRealProc(const char* name) {
-    EnsureRealDxgiLoaded();
-    if (g_real_dxgi == nullptr) {
-        return nullptr;
-    }
-    return reinterpret_cast<T>(reinterpret_cast<void*>(GetProcAddress(g_real_dxgi, name)));
-}
-
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
-}  // namespace ProxyDXGI
-
-#define DXGI_EXPORT extern "C" __declspec(dllexport)
-
-DXGI_EXPORT HRESULT WINAPI CreateDXGIFactory(REFIID riid, void** ppFactory) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(REFIID, void**)>("CreateDXGIFactory");
-    return fn ? fn(riid, ppFactory) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI CreateDXGIFactory1(REFIID riid, void** ppFactory) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(REFIID, void**)>("CreateDXGIFactory1");
-    return fn ? fn(riid, ppFactory) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI CreateDXGIFactory2(UINT Flags, REFIID riid, void** ppFactory) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(UINT, REFIID, void**)>("CreateDXGIFactory2");
-    return fn ? fn(Flags, riid, ppFactory) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGIGetDebugInterface1(UINT Flags, REFIID riid, void** pDebug) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(UINT, REFIID, void**)>("DXGIGetDebugInterface1");
-    return fn ? fn(Flags, riid, pDebug) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGIDeclareAdapterRemovalSupport() {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)()>("DXGIDeclareAdapterRemovalSupport");
-    return fn ? fn() : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGIDisableVBlankVirtualization() {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)()>("DXGIDisableVBlankVirtualization");
-    return fn ? fn() : E_FAIL;
-}
-
-DXGI_EXPORT void WINAPI ApplyCompatResolutionQuirking(void* a, void* b) {
-    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*, void*)>("ApplyCompatResolutionQuirking");
-    if (fn) fn(a, b);
-}
-
-DXGI_EXPORT void WINAPI CompatString(void* a) {
-    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*)>("CompatString");
-    if (fn) fn(a);
-}
-
-DXGI_EXPORT void WINAPI CompatValue(void* a, void* b) {
-    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*, void*)>("CompatValue");
-    if (fn) fn(a, b);
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGID3D10CreateDevice(void* a, void* b, void* c, void* d, void* e, void* f) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*, void*, void*, void*, void*)>("DXGID3D10CreateDevice");
-    return fn ? fn(a, b, c, d, e, f) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGID3D10CreateLayeredDevice(void* a, void* b, void* c, void* d, void* e) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*, void*, void*, void*)>("DXGID3D10CreateLayeredDevice");
-    return fn ? fn(a, b, c, d, e) : E_FAIL;
-}
-
-DXGI_EXPORT SIZE_T WINAPI DXGID3D10GetLayeredDeviceSize(void* a, void* b) {
-    static auto fn = ProxyDXGI::GetRealProc<SIZE_T(WINAPI*)(void*, void*)>("DXGID3D10GetLayeredDeviceSize");
-    return fn ? fn(a, b) : 0;
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGID3D10RegisterLayers(void* a, void* b) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*)>("DXGID3D10RegisterLayers");
-    return fn ? fn(a, b) : E_FAIL;
-}
-
-DXGI_EXPORT void WINAPI DXGIDumpJournal(void* a) {
-    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*)>("DXGIDumpJournal");
-    if (fn) fn(a);
-}
-
-DXGI_EXPORT HRESULT WINAPI DXGIReportAdapterConfiguration(void* a) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*)>("DXGIReportAdapterConfiguration");
-    return fn ? fn(a) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI PIXBeginCapture(void* a, void* b) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*, void*)>("PIXBeginCapture");
-    return fn ? fn(a, b) : E_FAIL;
-}
-
-DXGI_EXPORT HRESULT WINAPI PIXEndCapture(void* a) {
-    static auto fn = ProxyDXGI::GetRealProc<HRESULT(WINAPI*)(void*)>("PIXEndCapture");
-    return fn ? fn(a) : E_FAIL;
-}
-
-DXGI_EXPORT DWORD WINAPI PIXGetCaptureState() {
-    static auto fn = ProxyDXGI::GetRealProc<DWORD(WINAPI*)()>("PIXGetCaptureState");
-    return fn ? fn() : 0;
-}
-
-DXGI_EXPORT void WINAPI SetAppCompatStringPointer(void* a, void* b) {
-    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*, void*)>("SetAppCompatStringPointer");
-    if (fn) fn(a, b);
-}
-
-DXGI_EXPORT void WINAPI UpdateHMDEmulationStatus(void* a) {
-    static auto fn = ProxyDXGI::GetRealProc<void(WINAPI*)(void*)>("UpdateHMDEmulationStatus");
-    if (fn) fn(a);
-}
+#include "mod_loader_api.h"
 
 // -----------------------------------------------------------------------------
 // Mod Menu Engine & Overlay Implementation
@@ -213,6 +75,7 @@ void* g_resize_buffers_target = nullptr;
 void* g_execute_target = nullptr;
 std::atomic<LONG> g_active_hooks{0};
 std::atomic<bool> g_shutting_down{false};
+std::atomic<bool> g_hooks_installed{false};
 SRWLOCK g_lock = SRWLOCK_INIT;
 
 ID3D12CommandQueue* g_queue = nullptr;
@@ -310,9 +173,7 @@ static bool g_xinput_loaded = false;
 
 inline void EnsureXInputLoaded() {
     if (g_xinput_loaded) return;
-    HMODULE h = LoadLibraryW(L"xinput1_4.dll");
-    if (!h) h = LoadLibraryW(L"xinput1_3.dll");
-    if (!h) h = LoadLibraryW(L"xinput9_1_0.dll");
+    HMODULE h = LoadLibraryW(L"xinput9_1_0.dll");
     if (h) {
         g_pfnXInputGetState = reinterpret_cast<PFN_XInputGetState>(
             reinterpret_cast<void*>(GetProcAddress(h, "XInputGetState")));
@@ -743,7 +604,10 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
     return true;
 }
 
+void ScanAndDiscoverMods();
+
 void UpdateOverlayState() {
+    const bool was_visible = g_overlay_visible;
     if (g_shared != nullptr && g_shared->open_request != 0) {
         g_shared->open_request = 0;
         g_overlay_visible = true;
@@ -761,6 +625,7 @@ void UpdateOverlayState() {
     }
     g_last_b_down = b_down;
     g_last_escape_down = escape_down;
+    if (!was_visible && g_overlay_visible) ScanAndDiscoverMods();
 }
 
 enum class OptionType {
@@ -789,20 +654,15 @@ enum class ModType {
 
 struct ModItem {
     char dir_name[64] = {};
-    char json_path[MAX_PATH] = {};
     char id[64] = {};
     char name[128] = {};
     char category[64] = {};
     char version[32] = {};
     char author[64] = {};
     char description[512] = {};
-    char components[256] = {};
-    char plugin[64] = {};
-    char executable[64] = {};
     char action_label[32] = "Apply";
     ModType type = ModType::Toggle;
     bool enabled = true;
-    bool auto_apply = false;
     char status[128] = "Pronto";
     bool action_applied = false;
     std::vector<ModOption> options;
@@ -812,532 +672,110 @@ static std::vector<ModItem> g_discovered_mods;
 static int g_selected_mod = 0;
 static bool g_mods_scanned = false;
 
-namespace ModLogger {
-    void Init(const char* exe_dir);
-    void Log(const char* fmt, ...);
+static const DmModLoaderApi* g_loader_api = nullptr;
+
+void CopyLoaderView(const DmModView& view, ModItem& mod) {
+    std::snprintf(mod.dir_name, sizeof(mod.dir_name), "%s", view.directory);
+    std::snprintf(mod.id, sizeof(mod.id), "%s", view.id);
+    std::snprintf(mod.name, sizeof(mod.name), "%s", view.name);
+    std::snprintf(mod.category, sizeof(mod.category), "%s", view.category);
+    std::snprintf(mod.version, sizeof(mod.version), "%s", view.version);
+    std::snprintf(mod.author, sizeof(mod.author), "%s", view.author);
+    std::snprintf(mod.description, sizeof(mod.description), "%s", view.description);
+    std::snprintf(mod.action_label, sizeof(mod.action_label), "%s", view.action_label);
+    std::snprintf(mod.status, sizeof(mod.status), "%s", view.status);
+    mod.type = view.type == DmModType::Action ? ModType::Action : ModType::Toggle;
+    mod.enabled = view.runtime_enabled != FALSE;
+    mod.action_applied = view.state == DmModState::ActionCompleted;
+    mod.options.clear();
+
+    for (std::uint32_t index = 0; index < view.option_count; ++index) {
+        const DmModOptionView& source = view.options[index];
+        ModOption option = {};
+        std::snprintf(option.id, sizeof(option.id), "%s", source.id);
+        std::snprintf(option.name, sizeof(option.name), "%s", source.name);
+        if (source.type == DmOptionType::SliderInt) {
+            option.type = OptionType::SliderInt;
+            option.int_val = source.value.int_value;
+            option.min_int = source.min_int;
+            option.max_int = source.max_int;
+        } else if (source.type == DmOptionType::SliderFloat) {
+            option.type = OptionType::SliderFloat;
+            option.float_val = source.value.float_value;
+            option.min_float = source.min_float;
+            option.max_float = source.max_float;
+        } else {
+            option.type = OptionType::Toggle;
+            option.bool_val = source.value.bool_value != FALSE;
+        }
+        mod.options.push_back(option);
+    }
 }
 
-// -----------------------------------------------------------------------------
-// Generic Standalone Mod Action Dispatcher (C++ Native / Lua Only)
-// -----------------------------------------------------------------------------
-bool LaunchModActionProcess(ModItem& mod, const char* game_dir, const char* action_path, const char* action_name) {
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = {};
-    char command_line[MAX_PATH * 3] = {};
-
-    const char* extension = strrchr(action_path, '.');
-    if (extension != nullptr && _stricmp(extension, ".bat") == 0) {
-        std::snprintf(command_line, sizeof(command_line), "cmd.exe /d /s /c \"\"%s\"\"", action_path);
-    } else if (extension != nullptr && _stricmp(extension, ".lua") == 0) {
-        std::snprintf(command_line, sizeof(command_line), "lua \"%s\"", action_path);
-    } else {
-        std::snprintf(command_line, sizeof(command_line), "\"%s\"", action_path);
-    }
-
-    if (!CreateProcessA(nullptr, command_line, nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-                        nullptr, game_dir, &si, &pi)) {
-        const DWORD error = GetLastError();
-        mod.action_applied = false;
-        ModLogger::Log("[ModLoader] [ACTION_ERROR] CreateProcess falhou para %s (Win32 Error: %lu)", action_path, error);
-        std::snprintf(mod.status, sizeof(mod.status), "Falha ao executar (erro %lu)", error);
-        return false;
-    }
-
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    mod.action_applied = true;
-    ModLogger::Log("[ModLoader] [ACTION] Mod: %s -> %s", mod.name, action_path);
-    std::snprintf(mod.status, sizeof(mod.status), "Executado: %s", action_name);
-    return true;
+void RefreshModFromLoader(ModItem& mod) {
+    if (g_loader_api == nullptr || g_loader_api->GetModById == nullptr) return;
+    DmModView view = {};
+    view.struct_size = sizeof(view);
+    if (g_loader_api->GetModById(mod.id, &view) != FALSE) CopyLoaderView(view, mod);
 }
 
 void ExecuteModActionGeneric(ModItem& mod) {
-    char game_dir[MAX_PATH] = {};
-    GetModuleFileNameA(nullptr, game_dir, MAX_PATH);
-    char* last_slash = strrchr(game_dir, '\\');
-    if (last_slash) *last_slash = '\0';
-
-    ModLogger::Init(game_dir);
-
-    const char* folder = mod.dir_name[0] != '\0' ? mod.dir_name : mod.id;
-    char action_path[MAX_PATH] = {};
-    char action_name[MAX_PATH] = {};
-
-    // Prefer an explicit action declared by mod.json. This keeps the host generic
-    // while allowing directory names and public mod ids to differ safely.
-    if (mod.executable[0] != '\0') {
-        std::snprintf(action_path, sizeof(action_path), "%s\\mods\\%s\\%s", game_dir, folder, mod.executable);
-        std::snprintf(action_name, sizeof(action_name), "%s", mod.executable);
-        const DWORD attributes = GetFileAttributesA(action_path);
-        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            ModLogger::Log("[ModLoader] [ACTION_ERROR] Acao declarada nao encontrada: %s", action_path);
-            mod.action_applied = false;
-            std::snprintf(mod.status, sizeof(mod.status), "Acao nao encontrada: %s", mod.executable);
-            return;
-        }
-        LaunchModActionProcess(mod, game_dir, action_path, action_name);
-        return;
+    if (g_loader_api == nullptr || g_loader_api->ExecuteModAction == nullptr ||
+        g_loader_api->ExecuteModAction(mod.id) == FALSE) {
+        std::snprintf(mod.status, sizeof(mod.status), "ERRO: loader rejeitou a action.");
     }
-
-    // UE4SS-style generic fallback: native EXE first, then BAT, then Lua.
-    const char* patterns[] = {
-        "APLICAR_MOD_*.exe",
-        "APLICAR_MOD_*.bat",
-        "APLICAR_MOD_*.lua"
-    };
-
-    for (const char* pattern_name : patterns) {
-        char search_pattern[MAX_PATH] = {};
-        std::snprintf(search_pattern, sizeof(search_pattern), "%s\\mods\\%s\\%s", game_dir, folder, pattern_name);
-        WIN32_FIND_DATAA fd = {};
-        HANDLE hFind = FindFirstFileA(search_pattern, &fd);
-        if (hFind == INVALID_HANDLE_VALUE) {
-            continue;
-        }
-
-        std::snprintf(action_path, sizeof(action_path), "%s\\mods\\%s\\%s", game_dir, folder, fd.cFileName);
-        std::snprintf(action_name, sizeof(action_name), "%s", fd.cFileName);
-        FindClose(hFind);
-        LaunchModActionProcess(mod, game_dir, action_path, action_name);
-        return;
-    }
-
-    ModLogger::Log("[ModLoader] [ACTION_ERROR] Mod action sem executavel/script implementado: %s (Dir: %s, Id: %s)",
-                   mod.name, folder, mod.id);
-    mod.action_applied = false;
-    std::snprintf(mod.status, sizeof(mod.status), "Acao sem executavel/script implementado.");
-}
-
-// -----------------------------------------------------------------------------
-// Mod Loader Logging System (UE4SS-Inspired)
-// -----------------------------------------------------------------------------
-namespace ModLogger {
-    static FILE* g_log_file = nullptr;
-    
-    void Init(const char* exe_dir) {
-        if (!g_log_file) {
-            char log_path[MAX_PATH] = {};
-            std::snprintf(log_path, sizeof(log_path), "%s\\mods\\mod_loader.log", exe_dir);
-            g_log_file = fopen(log_path, "w");
-            if (g_log_file) {
-                fprintf(g_log_file, "=================================================================\n");
-                fprintf(g_log_file, "  Disgaea Mayhem Mod Loader (UE4SS-Style Dynamic Architecture)\n");
-                fprintf(g_log_file, "=================================================================\n");
-                fflush(g_log_file);
-            }
-        }
-    }
-
-    void Log(const char* fmt, ...) {
-        if (!g_log_file) return;
-        char buf[1024] = {};
-        va_list args;
-        va_start(args, fmt);
-        vsnprintf(buf, sizeof(buf), fmt, args);
-        va_end(args);
-        SYSTEMTIME now = {};
-        GetLocalTime(&now);
-        fprintf(g_log_file, "[%02u:%02u:%02u.%03u][T%lu] %s\n",
-                now.wHour, now.wMinute, now.wSecond, now.wMilliseconds,
-                GetCurrentThreadId(), buf);
-        fflush(g_log_file);
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Generic Standalone Plugin Lifecycle Manager (Toggle & Options)
-// -----------------------------------------------------------------------------
-static bool ResolveModDllPath(const char* exe_dir, const ModItem& mod, char* out_dll_path, size_t max_len, char* out_dll_name, size_t name_len) {
-    const char* folder_candidates[] = { mod.dir_name, mod.id };
-    
-    for (const char* folder : folder_candidates) {
-        if (!folder || folder[0] == '\0') continue;
-
-        // 1. If explicit plugin specified in mod.json
-        if (mod.plugin[0] != '\0') {
-            std::snprintf(out_dll_path, max_len, "%s\\mods\\%s\\%s", exe_dir, folder, mod.plugin);
-            if (GetFileAttributesA(out_dll_path) != INVALID_FILE_ATTRIBUTES) {
-                if (out_dll_name) std::snprintf(out_dll_name, name_len, "%s", mod.plugin);
-                return true;
-            }
-        }
-
-        // 2. Search for any .dll in mods/<folder>/*.dll
-        char pattern[MAX_PATH] = {};
-        std::snprintf(pattern, sizeof(pattern), "%s\\mods\\%s\\*.dll", exe_dir, folder);
-        WIN32_FIND_DATAA fd = {};
-        HANDLE hFind = FindFirstFileA(pattern, &fd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            std::snprintf(out_dll_path, max_len, "%s\\mods\\%s\\%s", exe_dir, folder, fd.cFileName);
-            if (out_dll_name) std::snprintf(out_dll_name, name_len, "%s", fd.cFileName);
-            FindClose(hFind);
-            return true;
-        }
-
-        // 3. Search in mods/<folder>/dlls/*.dll (UE4SS standard layout)
-        std::snprintf(pattern, sizeof(pattern), "%s\\mods\\%s\\dlls\\*.dll", exe_dir, folder);
-        hFind = FindFirstFileA(pattern, &fd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            std::snprintf(out_dll_path, max_len, "%s\\mods\\%s\\dlls\\%s", exe_dir, folder, fd.cFileName);
-            if (out_dll_name) std::snprintf(out_dll_name, name_len, "%s", fd.cFileName);
-            FindClose(hFind);
-            return true;
-        }
-    }
-    return false;
+    RefreshModFromLoader(mod);
 }
 
 void NotifyModToggle(ModItem& mod) {
-    char exe_dir[MAX_PATH] = {};
-    GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
-    char* last_slash = strrchr(exe_dir, '\\');
-    if (last_slash) *last_slash = '\0';
-
-    ModLogger::Init(exe_dir);
-
-    // 1. Sync enabled.txt on disk
-    const char* target_folder = (mod.dir_name[0] != '\0') ? mod.dir_name : mod.id;
-    char enabled_path[MAX_PATH] = {};
-    std::snprintf(enabled_path, sizeof(enabled_path), "%s\\mods\\%s\\enabled.txt", exe_dir, target_folder);
-    FILE* f_enabled = fopen(enabled_path, "w");
-    if (f_enabled) {
-        fputc(mod.enabled ? '1' : '0', f_enabled);
-        fclose(f_enabled);
+    if (g_loader_api == nullptr || g_loader_api->SetModEnabled == nullptr ||
+        g_loader_api->SetModEnabled(mod.id, mod.enabled ? TRUE : FALSE) == FALSE) {
+        std::snprintf(mod.status, sizeof(mod.status), "ERRO: transicao de ciclo de vida rejeitada.");
     }
+    RefreshModFromLoader(mod);
+}
 
-    // 2. Locate and dispatch to resident plugin DLL
-    char dll_path[MAX_PATH] = {};
-    char dll_name[MAX_PATH] = {};
-    if (ResolveModDllPath(exe_dir, mod, dll_path, sizeof(dll_path), dll_name, sizeof(dll_name))) {
-        HMODULE hMod = GetModuleHandleA(dll_name);
-        if (!hMod) {
-            hMod = LoadLibraryA(dll_path);
-            if (hMod) {
-                ModLogger::Log("[ModLoader] [LOAD_DLL] Mod: %s -> %s (HMODULE: %p)", mod.name, dll_path, hMod);
-            } else {
-                ModLogger::Log("[ModLoader] [ERROR] Falha ao carregar DLL: %s (Win32 Error: %lu)", dll_path, GetLastError());
-            }
-        }
-        
-        if (hMod) {
-            typedef void (*pfn_Mod_Enable)();
-            typedef void (*pfn_Mod_Disable)();
-            typedef void* (*pfn_start_mod)();
-            typedef void (*pfn_uninstall_mod)(void*);
-            typedef void (*pfn_Mod_SetOption)(const char*, int, bool);
-            
-            pfn_Mod_Enable fn_enable = (pfn_Mod_Enable)(void*)GetProcAddress(hMod, "Mod_Enable");
-            pfn_start_mod fn_start = (pfn_start_mod)(void*)GetProcAddress(hMod, "start_mod");
-            pfn_Mod_Disable fn_disable = (pfn_Mod_Disable)(void*)GetProcAddress(hMod, "Mod_Disable");
-            pfn_uninstall_mod fn_uninstall = (pfn_uninstall_mod)(void*)GetProcAddress(hMod, "uninstall_mod");
-            pfn_Mod_SetOption fn_set_opt = (pfn_Mod_SetOption)(void*)GetProcAddress(hMod, "Mod_SetOption");
-            
-            if (mod.enabled) {
-                bool dispatched = false;
-                if (fn_enable) { fn_enable(); dispatched = true; }
-                else if (fn_start) { fn_start(); dispatched = true; }
-                if (!dispatched) {
-                    ModLogger::Log("[ModLoader] [ABI_ERROR] DLL sem Mod_Enable/start_mod: %s", dll_path);
-                    std::snprintf(mod.status, sizeof(mod.status), "ERRO: DLL sem ABI de ativacao.");
-                    return;
-                }
-
-                if (fn_set_opt) {
-                    for (auto& opt : mod.options) {
-                        fn_set_opt(opt.id, opt.int_val, opt.bool_val);
-                    }
-                }
-                ModLogger::Log("[ModLoader] [ENABLE] Mod: %s ATIVADO (ON)", mod.name);
-                std::snprintf(mod.status, sizeof(mod.status), "Hook residente ATIVADO (ON) na memoria.");
-            } else {
-                if (fn_disable) fn_disable();
-                else if (fn_uninstall) fn_uninstall(nullptr);
-
-                ModLogger::Log("[ModLoader] [DISABLE] Mod: %s DESATIVADO (OFF)", mod.name);
-                std::snprintf(mod.status, sizeof(mod.status), "Hook residente DESATIVADO (OFF).");
-            }
-            return;
-        }
-    } else {
-        ModLogger::Log("[ModLoader] [CONFIG_ERROR] Toggle sem DLL residente: %s (Dir: %s, Id: %s)",
-                       mod.name, target_folder, mod.id);
-        std::snprintf(mod.status, sizeof(mod.status), "ERRO: toggle sem DLL residente.");
+void NotifyModOptionChanged(ModItem& mod, const ModOption& option) {
+    if (g_loader_api == nullptr || g_loader_api->SetModOption == nullptr) {
+        std::snprintf(mod.status, sizeof(mod.status), "ERRO: API do loader indisponivel.");
         return;
     }
-
-    std::snprintf(mod.status, sizeof(mod.status), mod.enabled ? "Mod ativado com sucesso." : "Mod desativado pelo usuario.");
-}
-
-void NotifyModOptionChanged(ModItem& mod, const ModOption& opt) {
-    char exe_dir[MAX_PATH] = {};
-    GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
-    char* last_slash = strrchr(exe_dir, '\\');
-    if (last_slash) *last_slash = '\0';
-
-    char dll_path[MAX_PATH] = {};
-    char dll_name[MAX_PATH] = {};
-    if (ResolveModDllPath(exe_dir, mod, dll_path, sizeof(dll_path), dll_name, sizeof(dll_name))) {
-        HMODULE hMod = GetModuleHandleA(dll_name);
-        if (!hMod) hMod = LoadLibraryA(dll_path);
-        if (hMod) {
-            typedef void (*pfn_Mod_SetOption)(const char*, int, bool);
-            pfn_Mod_SetOption fn_set_opt = (pfn_Mod_SetOption)(void*)GetProcAddress(hMod, "Mod_SetOption");
-            if (fn_set_opt) {
-                fn_set_opt(opt.id, opt.int_val, opt.bool_val);
-            }
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Lightweight JSON Parser / Serializer for mod.json
-// -----------------------------------------------------------------------------
-std::string ReadFileToString(const char* filepath) {
-    std::string content;
-    FILE* f = fopen(filepath, "rb");
-    if (!f) return content;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz > 0) {
-        content.resize(static_cast<size_t>(sz));
-        fread(&content[0], 1, static_cast<size_t>(sz), f);
-    }
-    fclose(f);
-    return content;
-}
-
-std::string JsonExtractString(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return "";
-    pos = json.find(':', pos + search.length());
-    if (pos == std::string::npos) return "";
-    pos = json.find('"', pos + 1);
-    if (pos == std::string::npos) return "";
-    size_t end_pos = json.find('"', pos + 1);
-    if (end_pos == std::string::npos) return "";
-    return json.substr(pos + 1, end_pos - pos - 1);
-}
-
-bool JsonExtractBool(const std::string& json, const std::string& key, bool default_val = false) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return default_val;
-    pos = json.find(':', pos + search.length());
-    if (pos == std::string::npos) return default_val;
-    size_t true_pos = json.find("true", pos);
-    size_t false_pos = json.find("false", pos);
-    size_t comma_pos = json.find_first_of(",}\n", pos);
-    if (true_pos != std::string::npos && (comma_pos == std::string::npos || true_pos < comma_pos)) {
-        return true;
-    }
-    if (false_pos != std::string::npos && (comma_pos == std::string::npos || false_pos < comma_pos)) {
-        return false;
-    }
-    return default_val;
-}
-
-int JsonExtractInt(const std::string& json, const std::string& key, int default_val = 0) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return default_val;
-    pos = json.find(':', pos + search.length());
-    if (pos == std::string::npos) return default_val;
-    ++pos;
-    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\r' || json[pos] == '\n')) {
-        pos++;
-    }
-    char* endptr = nullptr;
-    long val = strtol(json.c_str() + pos, &endptr, 10);
-    if (endptr != json.c_str() + pos) {
-        return static_cast<int>(val);
-    }
-    return default_val;
-}
-
-void ParseModJson(const std::string& filepath, ModItem& mod) {
-    std::string json = ReadFileToString(filepath.c_str());
-    if (json.empty()) return;
-
-    std::string id = JsonExtractString(json, "id");
-    std::string name = JsonExtractString(json, "name");
-    std::string category = JsonExtractString(json, "category");
-    std::string version = JsonExtractString(json, "version");
-    std::string author = JsonExtractString(json, "author");
-    std::string desc = JsonExtractString(json, "description");
-    std::string comps = JsonExtractString(json, "components");
-    std::string plugin = JsonExtractString(json, "plugin");
-    std::string executable = JsonExtractString(json, "executable");
-    std::string type_str = JsonExtractString(json, "type");
-    std::string action_lbl = JsonExtractString(json, "action_label");
-
-    if (!id.empty()) std::snprintf(mod.id, sizeof(mod.id), "%s", id.c_str());
-    if (!name.empty()) std::snprintf(mod.name, sizeof(mod.name), "%s", name.c_str());
-    if (!category.empty()) std::snprintf(mod.category, sizeof(mod.category), "%s", category.c_str());
-    if (!version.empty()) std::snprintf(mod.version, sizeof(mod.version), "%s", version.c_str());
-    if (!author.empty()) std::snprintf(mod.author, sizeof(mod.author), "%s", author.c_str());
-    if (!desc.empty()) std::snprintf(mod.description, sizeof(mod.description), "%s", desc.c_str());
-    if (!comps.empty()) std::snprintf(mod.components, sizeof(mod.components), "%s", comps.c_str());
-    if (!plugin.empty()) std::snprintf(mod.plugin, sizeof(mod.plugin), "%s", plugin.c_str());
-    if (!executable.empty()) std::snprintf(mod.executable, sizeof(mod.executable), "%s", executable.c_str());
-    if (!action_lbl.empty()) std::snprintf(mod.action_label, sizeof(mod.action_label), "%s", action_lbl.c_str());
-    mod.auto_apply = JsonExtractBool(json, "auto_apply", false);
-
-    if (type_str == "action") {
-        mod.type = ModType::Action;
+    DmModValue value = {};
+    value.struct_size = sizeof(value);
+    if (option.type == OptionType::SliderInt) {
+        value.type = DmOptionType::SliderInt;
+        value.int_value = option.int_val;
+    } else if (option.type == OptionType::SliderFloat) {
+        value.type = DmOptionType::SliderFloat;
+        value.float_value = option.float_val;
     } else {
-        mod.type = ModType::Toggle;
-        mod.enabled = JsonExtractBool(json, "enabled", true);
-
-        // Check enabled.txt in mod folder
-        size_t last_sep = filepath.find_last_of("\\/");
-        if (last_sep != std::string::npos) {
-            std::string enabled_txt_path = filepath.substr(0, last_sep) + "\\enabled.txt";
-            FILE* f_en = fopen(enabled_txt_path.c_str(), "r");
-            if (f_en) {
-                char ch = 0;
-                if (fread(&ch, 1, 1, f_en) == 1) {
-                    mod.enabled = (ch == '1');
-                }
-                fclose(f_en);
-            }
-        }
+        value.type = DmOptionType::Toggle;
+        value.bool_value = option.bool_val ? TRUE : FALSE;
     }
-
-    // Parse options array
-    size_t opt_pos = json.find("\"options\"");
-    if (opt_pos != std::string::npos) {
-        size_t arr_start = json.find('[', opt_pos);
-        size_t arr_end = json.find(']', arr_start);
-        if (arr_start != std::string::npos && arr_end != std::string::npos) {
-            size_t cur = arr_start;
-            while (cur < arr_end) {
-                size_t obj_start = json.find('{', cur);
-                if (obj_start == std::string::npos || obj_start >= arr_end) break;
-                size_t obj_end = json.find('}', obj_start);
-                if (obj_end == std::string::npos || obj_end > arr_end) break;
-
-                std::string obj_json = json.substr(obj_start, obj_end - obj_start + 1);
-                ModOption opt = {};
-                std::string opt_id = JsonExtractString(obj_json, "id");
-                std::string opt_name = JsonExtractString(obj_json, "name");
-                std::string opt_type = JsonExtractString(obj_json, "type");
-
-                std::snprintf(opt.id, sizeof(opt.id), "%s", opt_id.c_str());
-                std::snprintf(opt.name, sizeof(opt.name), "%s", opt_name.c_str());
-
-                if (opt_type == "slider_int") {
-                    opt.type = OptionType::SliderInt;
-                    opt.min_int = JsonExtractInt(obj_json, "min", 0);
-                    opt.max_int = JsonExtractInt(obj_json, "max", 100);
-                    opt.int_val = JsonExtractInt(obj_json, "value", JsonExtractInt(obj_json, "default", opt.min_int));
-                } else if (opt_type == "slider_float") {
-                    opt.type = OptionType::SliderFloat;
-                    opt.float_val = static_cast<float>(JsonExtractInt(obj_json, "value", 1));
-                } else {
-                    opt.type = OptionType::Toggle;
-                    opt.bool_val = JsonExtractBool(obj_json, "value", JsonExtractBool(obj_json, "default", true));
-                }
-                mod.options.push_back(opt);
-                cur = obj_end + 1;
-            }
-        }
+    if (g_loader_api->SetModOption(mod.id, option.id, &value) == FALSE) {
+        std::snprintf(mod.status, sizeof(mod.status), "ERRO: opcao rejeitada pelo mod.");
     }
+    RefreshModFromLoader(mod);
 }
 
 void ScanAndDiscoverMods() {
     g_discovered_mods.clear();
-
-    wchar_t exe_path[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
-    wchar_t* last_slash = wcsrchr(exe_path, L'\\');
-    if (last_slash) *last_slash = L'\0';
-
-    char exe_dir_a[MAX_PATH] = {};
-    WideCharToMultiByte(CP_UTF8, 0, exe_path, -1, exe_dir_a, sizeof(exe_dir_a), nullptr, nullptr);
-    ModLogger::Init(exe_dir_a);
-    ModLogger::Log("[ModLoader] [SCAN] Iniciando varredura da pasta mods em: %s\\mods", exe_dir_a);
-
-    std::wstring mods_search = std::wstring(exe_path) + L"\\mods\\*";
-    WIN32_FIND_DATAW find_data = {};
-    HANDLE hFind = FindFirstFileW(mods_search.c_str(), &find_data);
-    if (hFind == INVALID_HANDLE_VALUE) {
-        ModLogger::Log("[ModLoader] [WARN] Pasta mods nao encontrada.");
+    if (g_loader_api == nullptr || g_loader_api->GetModCount == nullptr || g_loader_api->GetMod == nullptr) {
+        g_mods_scanned = true;
         return;
     }
 
-    do {
-        if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-            wcscmp(find_data.cFileName, L".") != 0 &&
-            wcscmp(find_data.cFileName, L"..") != 0 &&
-            _wcsicmp(find_data.cFileName, L"native") != 0 &&
-            _wcsicmp(find_data.cFileName, L"main_menu") != 0 &&
-            _wcsicmp(find_data.cFileName, L"mod_menu") != 0) {
-            
-            char dir_name_a[64] = {};
-            WideCharToMultiByte(CP_UTF8, 0, find_data.cFileName, -1, dir_name_a, sizeof(dir_name_a), nullptr, nullptr);
-
-            ModItem mod = {};
-            std::snprintf(mod.dir_name, sizeof(mod.dir_name), "%s", dir_name_a);
-            std::snprintf(mod.id, sizeof(mod.id), "%s", dir_name_a);
-
-            std::wstring json_wpath = std::wstring(exe_path) + L"\\mods\\" + find_data.cFileName + L"\\mod.json";
-            DWORD attr = GetFileAttributesW(json_wpath.c_str());
-            if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                char json_path_a[MAX_PATH] = {};
-                WideCharToMultiByte(CP_UTF8, 0, json_wpath.c_str(), -1, json_path_a, sizeof(json_path_a), nullptr, nullptr);
-                std::snprintf(mod.json_path, sizeof(mod.json_path), "%s", json_path_a);
-                ParseModJson(json_path_a, mod);
-            } else {
-                // Mod sem mod.json -> defaults UE4SS style
-                std::snprintf(mod.name, sizeof(mod.name), "%s", dir_name_a);
-                mod.type = ModType::Toggle;
-                
-                // Read enabled.txt
-                char enabled_path[MAX_PATH] = {};
-                std::snprintf(enabled_path, sizeof(enabled_path), "%s\\mods\\%s\\enabled.txt", exe_dir_a, dir_name_a);
-                FILE* f_en = fopen(enabled_path, "r");
-                if (f_en) {
-                    char ch = 0;
-                    if (fread(&ch, 1, 1, f_en) == 1) {
-                        mod.enabled = (ch == '1');
-                    }
-                    fclose(f_en);
-                } else {
-                    mod.enabled = true;
-                }
-            }
-
-            if (mod.name[0] == '\0') {
-                std::snprintf(mod.name, sizeof(mod.name), "%s", mod.dir_name);
-            }
-            g_discovered_mods.push_back(mod);
-            ModLogger::Log("[ModLoader] [FOUND] Mod: %s (Dir: %s, Id: %s, Type: %s, Enabled: %s)",
-                mod.name, mod.dir_name, mod.id,
-                mod.type == ModType::Action ? "action" : "toggle",
-                mod.enabled ? "ON" : "OFF");
-        }
-    } while (FindNextFileW(hFind, &find_data));
-    FindClose(hFind);
-
+    const std::uint32_t count = g_loader_api->GetModCount();
+    for (std::uint32_t index = 0; index < count; ++index) {
+        DmModView view = {};
+        view.struct_size = sizeof(view);
+        if (g_loader_api->GetMod(index, &view) == FALSE || view.type == DmModType::System) continue;
+        ModItem mod = {};
+        CopyLoaderView(view, mod);
+        g_discovered_mods.push_back(std::move(mod));
+    }
     g_mods_scanned = true;
-    if (g_selected_mod >= static_cast<int>(g_discovered_mods.size())) {
-        g_selected_mod = 0;
-    }
-
-    ModLogger::Log("[ModLoader] [INIT] Inicializando mods ativos no boot...");
-
-    // Auto-enable resident toggle plugins on startup and optionally run explicit actions.
-    for (auto& mod : g_discovered_mods) {
-        if (mod.type == ModType::Toggle && mod.enabled) {
-            NotifyModToggle(mod);
-        } else if (mod.type == ModType::Action && mod.auto_apply) {
-            ModLogger::Log("[ModLoader] [AUTO_ACTION] Aplicando action no boot: %s", mod.name);
-            ExecuteModActionGeneric(mod);
-        }
-    }
+    if (g_selected_mod >= static_cast<int>(g_discovered_mods.size())) g_selected_mod = 0;
 }
 
 enum class ActiveFocusPanel {
@@ -1671,14 +1109,6 @@ void BuildOverlay(const ImVec2& display_size) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.85f, 1.0f));
         ImGui::TextWrapped("%s", mod.description);
         ImGui::PopStyleColor();
-
-        if (mod.components[0] != '\0') {
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Componentes Integrados:");
-            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            ImGui::TextWrapped("%s", mod.components);
-            ImGui::PopStyleColor();
-        }
 
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
         ImGui::Separator();
@@ -2169,88 +1599,79 @@ void RemoveHooks() {
 
 
 
-DWORD WINAPI AutoInitThread(LPVOID) {
-    HMODULE game_exe = GetModuleHandleW(nullptr);
-    if (!game_exe) {
-        return 0;
+}  // namespace
+
+extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
+    return DM_MOD_LOADER_ABI_VERSION;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
+    if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
+        context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||
+        context->loader->struct_size != sizeof(DmModLoaderApi) ||
+        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION) {
+        return FALSE;
     }
 
-    char game_dir[MAX_PATH] = {};
-    GetModuleFileNameA(nullptr, game_dir, MAX_PATH);
-    char* last_slash = strrchr(game_dir, '\\');
-    if (last_slash) *last_slash = '\0';
-    ModLogger::Init(game_dir);
-    ModLogger::Log("[ModLoader] [BOOT] AutoInitThread iniciado pelo proxy dxgi.dll");
-
+    g_loader_api = context->loader;
     g_shared = &g_embedded_shared;
     InterlockedExchange(&g_shared->status, STATUS_WAITING);
     InterlockedExchange(&g_shared->error_code, 0);
     g_shared->error_message[0] = '\0';
-
-    // Run discovery synchronously before Present can call BuildOverlay().
-    // This removes the race between the old loader thread and the render thread.
     ScanAndDiscoverMods();
-
-    if (CreateHooks()) {
-        SetStatus(STATUS_HOOKS_INSTALLED);
-        ModLogger::Log("[ModLoader] [BOOT] Hooks DirectX 12 instalados com sucesso");
-    } else {
-        ModLogger::Log("[ModLoader] [BOOT_ERROR] Falha ao instalar hooks DirectX 12 (codigo=%ld, msg=%s)",
-                       g_shared ? g_shared->error_code : -1L,
-                       g_shared ? g_shared->error_message : "sem estado compartilhado");
-    }
-
-    return 0;
+    return TRUE;
 }
 
-}  // namespace
-
-extern "C" __declspec(dllexport) DWORD WINAPI InitializeModMenu(void* parameter) {
-    if (parameter != nullptr) {
-        g_shared = static_cast<SharedState*>(parameter);
-    }
+extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
+    if (g_hooks_installed.load(std::memory_order_acquire)) return TRUE;
+    g_shutting_down.store(false, std::memory_order_release);
     if (!CreateHooks()) {
-        return 0;
+        if (g_loader_api != nullptr && g_loader_api->Log != nullptr) {
+            g_loader_api->Log("mod_menu", g_shared->error_message);
+        }
+        return FALSE;
     }
+    g_hooks_installed.store(true, std::memory_order_release);
     SetStatus(STATUS_HOOKS_INSTALLED);
-    return 1;
+    if (g_loader_api != nullptr && g_loader_api->Log != nullptr) {
+        g_loader_api->Log("mod_menu", "Hooks DirectX 12 instalados.");
+    }
+    return TRUE;
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI ShutdownModMenu(void*) {
-    if (g_shared == nullptr) {
-        return 0;
-    }
+extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
+    if (!g_hooks_installed.exchange(false, std::memory_order_acq_rel)) return TRUE;
     RemoveHooks();
     if (g_active_hooks.load(std::memory_order_acquire) != 0) {
-        SetFailure(1701, "Timed out while stopping active DirectX hooks");
-        return 0;
+        SetFailure(1701, "Timeout ao encerrar hooks DirectX ativos.");
+        return FALSE;
     }
     AcquireSRWLockExclusive(&g_lock);
-    if (g_overlay_visible || g_waiting_for_back_release) {
-        SetMainMenuInputEnabled();
-    }
+    if (g_overlay_visible || g_waiting_for_back_release) SetMainMenuInputEnabled();
     DestroyRenderer();
     SafeRelease(g_queue);
     SetStatus(STATUS_WAITING);
     ReleaseSRWLockExclusive(&g_lock);
-    return 1;
+    return TRUE;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char*, const DmModValue*) {
+    return FALSE;
+}
+
+extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
+    Mod_Disable();
+    g_loader_api = nullptr;
+    if (g_hook_stub != nullptr) {
+        VirtualFree(g_hook_stub, 0, MEM_RELEASE);
+        g_hook_stub = nullptr;
+    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_module = instance;
         DisableThreadLibraryCalls(instance);
-        // Do not call LoadLibrary from DllMain (loader-lock hazard). DXGI is resolved lazily.
-        HANDLE thread = CreateThread(nullptr, 0, AutoInitThread, nullptr, 0, nullptr);
-        if (thread != nullptr) {
-            CloseHandle(thread);
-        }
-    } else if (reason == DLL_PROCESS_DETACH) {
-        ShutdownModMenu(nullptr);
-        if (g_hook_stub != nullptr) {
-            VirtualFree(g_hook_stub, 0, MEM_RELEASE);
-            g_hook_stub = nullptr;
-        }
     }
     return TRUE;
 }

@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "dlc_boost_unlocker",
   "name": "DLCs, Microtransações & Boost Tickets 900%",
   "category": "Recursos & Inventário",
@@ -10,18 +11,6 @@
   "action_label": "Apply",
   "executable": "APLICAR_MOD_DLC.exe",
   "components": [
-    "mods/dlc_unlocker/APLICAR_MOD_DLC.exe",
-    "mods/dlc_unlocker/APLICAR_MOD_DLC.bat"
-  ],
-  "options": [
-    {
-      "id": "ticket_amount",
-      "name": "Quantidade de Boost Tickets (900%)",
-      "type": "slider_int",
-      "min": 10,
-      "max": 99,
-      "default": 30,
-      "value": 30
-    }
+    "mods/dlc_unlocker/APLICAR_MOD_DLC.exe"
   ]
 }

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "mod_menu",
+  "name": "Disgaea Mayhem Mod Menu",
+  "category": "Sistema",
+  "version": "2.0.0",
+  "author": "Disgaea Mayhem Mod Team",
+  "description": "Interface privilegiada do Mod Loader. Nao descobre, injeta nem gerencia DLLs diretamente.",
+  "type": "system",
+  "required": true,
+  "load_order": 0,
+  "plugin": "mod_menu.dll"
+}

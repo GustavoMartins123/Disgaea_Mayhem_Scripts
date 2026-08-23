@@ -65,3 +65,12 @@ A engine realiza verificações de thresholds de energia nas seguintes instruç�
 
 * **Mecanismo:** Hook residente em segundo plano que localiza as instâncias ativas de `CCharacterWorldInformation` (VTable `0x140A57610`) e `CUIUnion_CharacterWorld_Energy` (VTable `0x140A71728`) via varredura por assinatura de VTable na RAM.
 * **Trava:** Mantém a energia do jogador congelada em 100/100 (ou no valor configurado pelo slider do menu) a cada 80ms, permitindo turnos e passos infinitos.
+
+### Construtor validado
+
+- `CCharacterWorldInformation::CCharacterWorldInformation`: RVA `0x004501D0` (VA `0x1404501D0`).
+- Prólogo esperado: `48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57`.
+- A escrita da VTable `0x140A57610` ocorre em `0x1404501FF`.
+- Assinatura observada no ABI x64: `void* (this, constructor_arg, allocator_arg)`, em `RCX`, `RDX` e `R8`.
+
+O plugin valida o prólogo antes de instalar MinHook e confirma a VTable do objeto retornado antes de armazenar a instância. Uma build divergente é rejeitada.

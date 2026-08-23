@@ -1,36 +1,16 @@
 # Mod Menu de Disgaea Mayhem
 
-O Main Menu e construido em C++, nao pelos scripts Lua em `data/script`. Esta
-implementacao cria o quinto item nativo abaixo de **System**, troca o rotulo
-reservado de **Give Up** por **Mods** no atlas e conecta o indice 4 a um Mod
-Manager renderizado no backbuffer DirectX 12 do proprio jogo.
+O Mod Menu e a interface do Mod Loader, nao o loader. Ele e carregado como system mod obrigatorio de `mods/mod_menu/mod_menu.dll` e recebe a API ABI v1 criada pelo `dxgi.dll`.
 
-## Auto-Inicializacao & Uso
+## Uso
 
-1. Feche o jogo e execute `INSTALAR_MOD_MENU.bat` uma unica vez para aplicar a textura do rotulo no atlas.
-2. Abra o jogo pela Steam normalmente e carregue o seu save.
-   * O proxy nativo `dxgi.dll` inicializa o Mod Menu e aplica os patches em memoria automaticamente ao iniciar o executavel.
-3. Abra o Main Menu no jogo e selecione a opcao **Mods**.
-4. Pressione **B** (controle) ou **Esc** (teclado) para fechar o overlay e retornar ao jogo.
+1. Compile com `native/mod_menu_overlay/build.ps1`.
+2. Abra o jogo normalmente.
+3. Abra o overlay com `F1`, `Insert` ou `Home`. No controle, use `L3 + R3` ou `Back`.
+4. Feche com `Esc` ou `B`.
 
-Enquanto o Mod Manager estiver aberto, a entrada do Main Menu fica bloqueada
-sem ocultar seus elementos. A entrada do jogo so e reativada depois que o botao
-for solto, impedindo que o mesmo comando tambem feche o Main Menu.
+O quinto item visual do Main Menu depende de um patch separado no atlas NMPLTEX/YKCMP. O instalador C++ atual apenas valida o pacote e retorna erro explicito porque a escrita do atlas ainda nao esta implementada. Os atalhos sao a entrada canonica do overlay.
 
-## Estado dos modulos
+O Mod Menu consulta o catalogo, solicita enable/disable, envia opcoes tipadas e pede a execucao de actions. Ele nao descobre pastas, interpreta manifestos, carrega DLLs, persiste estado ou escolhe executaveis.
 
-Nenhum modulo possui ABI nativa registrada no momento. Por isso `mods/registry.json`
-esta vazio e o menu informa esse estado, sem toggles ficticios. Novos sub-mods e trapaças
-serao adicionados conforme implementados no registro.
-
-## Arquivos
-
-- `dxgi.dll`: proxy DirectX 12 que auto-inicializa o mod menu e aplica os patches em memoria.
-- `INSTALAR_MOD_MENU.py`: valida o pacote e instala o rotulo no FAD de forma transacional.
-- `mods/native/DisgaeaMayhemModMenu.dll`: DLL nativa DirectX 12 in-process.
-- `native/mod_menu_overlay`: fonte C++, build reproduzivel (`build.ps1`) e dependencias oficiais (Dear ImGui 1.92.6 + MinHook 1.3.4).
-- `tools/fad_texture_tool.py`: parser/recompressor estrito NMPLTEX/YKCMP/LZ4.
-- `mods/main_menu/mods_slot.dds`: rotulo selecionado e nao selecionado em BC7.
-
-O instalador cria `AnmDat_1_00_EN.fad.mod-menu-original` somente como backup de
-rollback local. Esse arquivo e um artefato gerado e nao deve ser versionado.
+Consulte `docs/MOD_LOADER_ARQUITETURA.md` para o fluxo e a ABI.

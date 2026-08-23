@@ -12,7 +12,8 @@ typedef int (*pfn_LZ4_compress_default)(const char* src, char* dst, int srcSize,
 bool is_game_running() {
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap == INVALID_HANDLE_VALUE) return false;
-    PROCESSENTRY32 pe = { sizeof(pe) };
+    PROCESSENTRY32 pe = {};
+    pe.dwSize = sizeof(pe);
     bool running = false;
     if (Process32First(hSnap, &pe)) {
         do {
@@ -38,40 +39,51 @@ int main() {
         return 1;
     }
 
-    const char* fad_paths[] = {
-        "../../data/fairy/AnmDat_1_00_EN.fad",
-        "data/fairy/AnmDat_1_00_EN.fad",
-        "E:/Steam/steamapps/common/Disgaea Mayhem/data/fairy/AnmDat_1_00_EN.fad"
-    };
+    char installer_path[MAX_PATH] = {};
+    if (!GetModuleFileNameA(NULL, installer_path, MAX_PATH)) {
+        printf("[ERRO] Nao foi possivel localizar o proprio instalador.\n");
+        return 1;
+    }
+    char* separator = strrchr(installer_path, '\\');
+    if (separator == NULL) {
+        printf("[ERRO] Caminho do instalador invalido.\n");
+        return 1;
+    }
+    *separator = '\0';
 
-    const char* target_fad = NULL;
-    for (int i = 0; i < 3; ++i) {
-        DWORD attr = GetFileAttributesA(fad_paths[i]);
-        if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-            target_fad = fad_paths[i];
-            break;
-        }
+    char mod_directory[MAX_PATH] = {};
+    snprintf(mod_directory, sizeof(mod_directory), "%s", installer_path);
+    char relative_game_directory[MAX_PATH] = {};
+    snprintf(relative_game_directory, sizeof(relative_game_directory), "%s\\..\\..", mod_directory);
+    char game_directory[MAX_PATH] = {};
+    if (!GetFullPathNameA(relative_game_directory, MAX_PATH, game_directory, NULL)) {
+        printf("[ERRO] Nao foi possivel resolver a pasta do jogo.\n");
+        return 1;
     }
 
-    if (!target_fad) {
+    char target_fad[MAX_PATH] = {};
+    snprintf(target_fad, sizeof(target_fad), "%s\\data\\fairy\\AnmDat_1_00_EN.fad", game_directory);
+    DWORD fad_attributes = GetFileAttributesA(target_fad);
+    if (fad_attributes == INVALID_FILE_ATTRIBUTES || (fad_attributes & FILE_ATTRIBUTE_DIRECTORY)) {
         printf("[ERRO] Arquivo AnmDat_1_00_EN.fad nao encontrado.\n");
         return 1;
     }
 
     printf("[OK] Atlas localizado: %s\n", target_fad);
 
-    // Carregar lz4.dll
-    HMODULE hLz4 = LoadLibraryA("lz4.dll");
-    if (!hLz4) hLz4 = LoadLibraryA("../../lz4.dll");
-    if (!hLz4) hLz4 = LoadLibraryA("E:/Steam/steamapps/common/Disgaea Mayhem/lz4.dll");
+    char lz4_path[MAX_PATH] = {};
+    snprintf(lz4_path, sizeof(lz4_path), "%s\\lz4.dll", game_directory);
+    HMODULE hLz4 = LoadLibraryA(lz4_path);
 
     if (!hLz4) {
         printf("[ERRO] lz4.dll nao encontrada.\n");
         return 1;
     }
 
-    pfn_LZ4_decompress_safe fn_decompress = (pfn_LZ4_decompress_safe)GetProcAddress(hLz4, "LZ4_decompress_safe");
-    pfn_LZ4_compress_default fn_compress = (pfn_LZ4_compress_default)GetProcAddress(hLz4, "LZ4_compress_default");
+    pfn_LZ4_decompress_safe fn_decompress = reinterpret_cast<pfn_LZ4_decompress_safe>(
+        reinterpret_cast<void*>(GetProcAddress(hLz4, "LZ4_decompress_safe")));
+    pfn_LZ4_compress_default fn_compress = reinterpret_cast<pfn_LZ4_compress_default>(
+        reinterpret_cast<void*>(GetProcAddress(hLz4, "LZ4_compress_default")));
 
     if (!fn_decompress || !fn_compress) {
         printf("[ERRO] Simbolos LZ4 nao encontrados na lz4.dll.\n");
@@ -81,22 +93,10 @@ int main() {
 
     printf("[OK] Biblioteca LZ4 carregada com sucesso.\n");
 
-    // Ler DDS patch
-    const char* dds_paths[] = {
-        "main_menu/mods_slot.dds",
-        "mods/main_menu/mods_slot.dds",
-        "mods/mod_menu/main_menu/mods_slot.dds"
-    };
-    const char* target_dds = NULL;
-    for (int i = 0; i < 3; ++i) {
-        DWORD attr = GetFileAttributesA(dds_paths[i]);
-        if (attr != INVALID_FILE_ATTRIBUTES) {
-            target_dds = dds_paths[i];
-            break;
-        }
-    }
-
-    if (!target_dds) {
+    char target_dds[MAX_PATH] = {};
+    snprintf(target_dds, sizeof(target_dds), "%s\\main_menu\\mods_slot.dds", mod_directory);
+    DWORD dds_attributes = GetFileAttributesA(target_dds);
+    if (dds_attributes == INVALID_FILE_ATTRIBUTES || (dds_attributes & FILE_ATTRIBUTE_DIRECTORY)) {
         printf("[ERRO] mods_slot.dds nao encontrado.\n");
         FreeLibrary(hLz4);
         return 1;
@@ -121,19 +121,8 @@ int main() {
         return 1;
     }
 
-    // Backup
-    char backup_path[MAX_PATH] = {};
-    snprintf(backup_path, sizeof(backup_path), "%s.mod-menu-original", target_fad);
-    if (GetFileAttributesA(backup_path) == INVALID_FILE_ATTRIBUTES) {
-        CopyFileA(target_fad, backup_path, TRUE);
-        printf("[OK] Backup salvo como %s\n", backup_path);
-    }
-
-    printf("[OK] Patch de textura validado e pronto!\n");
-    printf("\n============================================================\n");
-    printf("  ROTULO MODS INSTALADO COM SUCESSO NO ATLAS DO MAIN MENU!\n");
-    printf("============================================================\n");
-
+    printf("[ERRO] Pacote validado, mas a gravacao NMPLTEX/YKCMP nao esta implementada neste instalador.\n");
+    printf("       Nenhum arquivo foi alterado.\n");
     FreeLibrary(hLz4);
-    return 0;
+    return 2;
 }

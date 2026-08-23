@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "item_world",
   "name": "Item World - Multiplicador de Nível & Inocentes",
   "category": "Item World",
@@ -6,12 +7,10 @@
   "author": "Disgaea Mayhem Mod Team",
   "description": "Acelera a evolução no Mundo dos Itens. Quando ativado (ON), o hook residente em memória intercepta a conclusão de cada andar multiplicando o ganho de níveis e subjugando 100% dos Inocentes automaticamente.",
   "type": "toggle",
-  "enabled": true,
+  "load_order": 110,
   "plugin": "item_world.dll",
   "components": [
-    "mods/item_world/item_world.dll",
-    "mods/item_world/APLICAR_MOD_ITEM_WORLD.exe",
-    "mods/item_world/APLICAR_MOD_ITEM_WORLD.bat"
+    "mods/item_world/item_world.dll"
   ],
   "options": [
     {
@@ -20,14 +19,12 @@
       "type": "slider_int",
       "min": 1,
       "max": 10,
-      "default": 5,
       "value": 5
     },
     {
       "id": "auto_subdue",
       "name": "Subjugar Inocentes Automaticamente (100%)",
       "type": "toggle",
-      "default": true,
       "value": true
     },
     {
@@ -36,7 +33,6 @@
       "type": "slider_int",
       "min": 10,
       "max": 100,
-      "default": 75,
       "value": 75
     }
   ]

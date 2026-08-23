@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "chara_world",
   "name": "Chara World - Energia Infinita (Travar em 100)",
   "category": "Chara World",
@@ -6,12 +7,10 @@
   "author": "Disgaea Mayhem Mod Team",
   "description": "Mantém a energia do Mundo dos Personagens (Chara World / Sugoroku) sempre travada em 100/100 (ou valor configurado), permitindo explorar todos os blocos, eventos, fontes termais e estátuas sem nunca esgotar os turnos.",
   "type": "toggle",
-  "enabled": true,
+  "load_order": 100,
   "plugin": "chara_world.dll",
   "components": [
-    "mods/chara_world/chara_world.dll",
-    "mods/chara_world/APLICAR_MOD_CHARA_WORLD.exe",
-    "mods/chara_world/APLICAR_MOD_CHARA_WORLD.bat"
+    "mods/chara_world/chara_world.dll"
   ],
   "options": [
     {
@@ -20,14 +19,12 @@
       "type": "slider_int",
       "min": 10,
       "max": 999,
-      "default": 100,
       "value": 100
     },
     {
       "id": "freeze_energy",
       "name": "Congelar Energia Automaticamente",
       "type": "toggle",
-      "default": true,
       "value": true
     }
   ]

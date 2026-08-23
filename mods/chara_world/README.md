@@ -1,27 +1,16 @@
-# 🎲 Mod: Chara World - Energia Infinita (Disgaea Mayhem)
+# Chara World - Energia Infinita
 
-Este mod congela a **Energia (ENERGY)** dentro do tabuleiro do **Mundo dos Personagens (Chara World / Sugoroku)** em 100/100 ou no valor desejado.
+Plugin nativo ABI v1 que mantem a energia do Chara World no valor configurado.
 
----
+## Ciclo de vida
 
-## ⚡ Recursos
+- `Mod_Initialize`: valida a ABI e instala o hook do construtor de `CCharacterWorldInformation`.
+- `Mod_SetOption`: recebe `locked_energy` e `freeze_energy` tipados.
+- `Mod_Enable`: inicia uma unica worker e habilita o efeito.
+- `Mod_Disable`: interrompe o efeito e invalida a instancia em cache.
+- `Mod_Shutdown`: encerra a worker e remove o hook.
+- `DllMain`: passivo.
 
-* **Energia Travada:** Impede o esgotamento de energia ao rolar dados, andar pelos blocos e travar batalhas.
-* **Exploração Completa:** Permite visitar 100% dos blocos do mapa, derrotar todos os clones e passar por todas as fontes de bônus de atributos.
-* **Hook Residente (`chara_world.dll`):** Roda de forma contínua e em tempo real em segundo plano quando o mod estiver **ATIVADO (ON)** no Mod Menu.
-* **Ajuste Dinâmico:** Altere o valor da energia travada (ex: 100, 200, 999) direto pelo slider do Mod Menu.
+O plugin e carregado automaticamente pelo `dxgi.dll` quando `enabled.txt` contem `1`. Nao ha injecao manual nem segundo gerenciador de estado.
 
----
-
-## 📁 Estrutura de Arquivos
-
-```text
-mods/chara_world/
-├── enabled.txt              # Flag de ativacao (1 = ON, 0 = OFF)
-├── mod.json                 # Metadados e opcoes do Mod Menu
-├── chara_world.dll          # DLL de hook residente em memoria (C++)
-├── chara_world.cpp          # Codigo-fonte C++ nativo
-├── APLICAR_MOD_CHARA_WORLD.exe # Injetor standalone C++
-├── APLICAR_MOD_CHARA_WORLD.bat # Lancador de 1 clique
-└── README.md                # Este documento
-```
+Consulte `docs/SUBSISTEMA_CHARA_WORLD.md` e `docs/MOD_LOADER_ARQUITETURA.md`.

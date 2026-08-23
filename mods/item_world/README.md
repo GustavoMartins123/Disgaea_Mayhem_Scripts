@@ -1,21 +1,19 @@
-# 🗡️ Mod de Item World - Multiplicador de Nível & Subjugador de Inocentes (C++ Nativo)
+# Item World
 
-Módulo autônomo (*standalone*) desenvolvido em **C++ Nativo** para aceleração de evolução de itens e subjugação automática de Inocentes no **Disgaea Mayhem**.
+Plugin nativo planejado para multiplicar niveis e subjugar Inocentes no Item World.
 
----
+## Estado real
 
-## 📌 Funcionalidades
+O codigo atual conhece os layouts de `CItemWorldData` e `CItemStatus`, mas ainda nao possui um hook validado que capture a instancia ativa de `CItemWorldData`. A variavel `g_cached_item_world` nunca era preenchida; por isso a versao anterior podia aparecer como ativa sem alterar o jogo.
 
-1. **Multiplicador de Nível de Equipamento:** Concede bônus de níveis configurável (+1 a +10 Lv por andar, ou boost direto) no Item World.
-2. **Subjugação 100% de Inocentes:** Todos os Inocentes (*Specialists*) encontrados nos itens são marcados como Subjugados (*Subdued* / Amarelo) e seus valores base são automaticamente duplicados.
-3. **Controle de Parâmetros:** Configurações salvas diretamente em `mod.json`.
-4. **Binário Nativo C++:** Execução ultrarrápida compilada em x64 (`APLICAR_MOD_ITEM_WORLD.exe`), sem dependência de interpretadores externos.
+Na ABI v1, `Mod_Initialize` retorna falha explicitamente e o loader mostra o erro. Nao use injecao manual para contornar essa validacao.
 
----
+Para concluir o mod e necessario:
 
-## 🚀 Como Executar Standalone
+1. identificar e validar o construtor/factory ou um metodo estavel que receba `CItemWorldData*`;
+2. instalar o hook em `Mod_Initialize` fora de `DllMain`;
+3. limpar a referencia ao destruir/sair da sessao;
+4. implementar ou remover a opcao `mystery_room_rate`;
+5. somente entao permitir `Mod_Enable`.
 
-1. Abra o jogo normalmente pela Steam.
-2. Dê um duplo clique em:
-   * **`APLICAR_MOD_ITEM_WORLD.exe`** (ou `APLICAR_MOD_ITEM_WORLD.bat`)
-3. O binário sincronizará as tabelas do Item World e aplicará o multiplicador e a subjugação aos seus equipamentos!
+Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` e `docs/MOD_LOADER_ARQUITETURA.md`.

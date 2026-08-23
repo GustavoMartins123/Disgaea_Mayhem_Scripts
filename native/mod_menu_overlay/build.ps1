@@ -1,23 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
-$project = Split-Path -Parent $MyInvocation.MyCommand.Path
-$gameRoot = Resolve-Path (Join-Path $project '..\..')
-$outputDirectory = Join-Path $project 'build'
-$objectDirectory = Join-Path $outputDirectory 'obj'
-$output = Join-Path $outputDirectory 'DisgaeaMayhemModMenu.dll'
+$menuProject = Split-Path -Parent $MyInvocation.MyCommand.Path
+$nativeRoot = Resolve-Path (Join-Path $menuProject '..')
+$gameRoot = Resolve-Path (Join-Path $nativeRoot '..')
+$loaderProject = Join-Path $nativeRoot 'mod_loader'
+$buildRoot = Join-Path $menuProject 'build'
+$menuObjectRoot = Join-Path $buildRoot 'obj-menu'
+$loaderObjectRoot = Join-Path $buildRoot 'obj-loader'
+$pluginObjectRoot = Join-Path $buildRoot 'obj-plugins'
 $gcc = 'C:\TDM-GCC-64\bin\gcc.exe'
 $gxx = 'C:\TDM-GCC-64\bin\g++.exe'
-
-# Prefer the project's TDM-GCC toolchain, but allow a MinGW toolchain from PATH
-# so the same build is reproducible on CI and other Windows machines.
-if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
-    $gccCommand = Get-Command gcc.exe -ErrorAction SilentlyContinue
-    if ($gccCommand) { $gcc = $gccCommand.Source }
-}
-if (-not (Test-Path -LiteralPath $gxx -PathType Leaf)) {
-    $gxxCommand = Get-Command g++.exe -ErrorAction SilentlyContinue
-    if ($gxxCommand) { $gxx = $gxxCommand.Source }
-}
 
 foreach ($compiler in @($gcc, $gxx)) {
     if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
@@ -25,114 +17,153 @@ foreach ($compiler in @($gcc, $gxx)) {
     }
 }
 
-New-Item -ItemType Directory -Force $objectDirectory | Out-Null
+New-Item -ItemType Directory -Force $menuObjectRoot, $loaderObjectRoot, $pluginObjectRoot | Out-Null
 
-$commonIncludes = @(
-    "-I$project\vendor\minhook\include",
-    "-I$project\vendor\minhook\src",
-    "-I$project\vendor\imgui",
-    "-I$project\vendor\imgui\backends"
+$includes = @(
+    "-I$menuProject\vendor\minhook\include",
+    "-I$menuProject\vendor\minhook\src",
+    "-I$menuProject\vendor\imgui",
+    "-I$menuProject\vendor\imgui\backends",
+    "-I$loaderProject"
 )
-$cFlags = @('-O2', '-DNDEBUG', '-D_WIN64', '-Wall', '-Wextra', '-Werror') + $commonIncludes
-$cppFlags = @('-std=c++17', '-O2', '-DNDEBUG', '-D_WIN64', '-Wall', '-Wextra', '-Werror') + $commonIncludes
+$cFlags = @('-O2', '-DNDEBUG', '-D_WIN64', '-Wall', '-Wextra', '-Werror') + $includes
+$cppFlags = @('-std=c++17', '-O2', '-DNDEBUG', '-D_WIN64', '-Wall', '-Wextra', '-Werror') + $includes
 
-$cSources = @(
-    'vendor\minhook\src\buffer.c',
-    'vendor\minhook\src\hook.c',
-    'vendor\minhook\src\trampoline.c',
-    'vendor\minhook\src\hde\hde64.c'
+function Compile-CObject {
+    param([string]$Source, [string]$ObjectRoot)
+    $name = ($Source -replace '[\\/:.]', '_') + '.o'
+    $object = Join-Path $ObjectRoot $name
+    & $gcc @cFlags -c $Source -o $object
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar $Source" }
+    return $object
+}
+
+function Compile-CppObject {
+    param([string]$Source, [string]$ObjectRoot)
+    $name = ($Source -replace '[\\/:.]', '_') + '.o'
+    $object = Join-Path $ObjectRoot $name
+    & $gxx @cppFlags -c $Source -o $object
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar $Source" }
+    return $object
+}
+
+$minHookSources = @(
+    (Join-Path $menuProject 'vendor\minhook\src\buffer.c'),
+    (Join-Path $menuProject 'vendor\minhook\src\hook.c'),
+    (Join-Path $menuProject 'vendor\minhook\src\trampoline.c'),
+    (Join-Path $menuProject 'vendor\minhook\src\hde\hde64.c')
 )
-$cppSources = @(
-    'mod_menu_overlay.cpp',
+
+$menuObjects = [System.Collections.Generic.List[string]]::new()
+foreach ($source in $minHookSources) { $menuObjects.Add((Compile-CObject $source $menuObjectRoot)) }
+$menuObjects.Add((Compile-CppObject (Join-Path $menuProject 'mod_menu_overlay.cpp') $menuObjectRoot))
+foreach ($source in @(
     'vendor\imgui\imgui.cpp',
     'vendor\imgui\imgui_draw.cpp',
     'vendor\imgui\imgui_tables.cpp',
     'vendor\imgui\imgui_widgets.cpp',
     'vendor\imgui\backends\imgui_impl_dx12.cpp'
-)
-$objects = [System.Collections.Generic.List[string]]::new()
-
-foreach ($source in $cSources) {
-    $name = ($source -replace '[\\/:]', '_') + '.o'
-    $object = Join-Path $objectDirectory $name
-    & $gcc @cFlags -c (Join-Path $project $source) -o $object
-    if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao compilar $source"
-    }
-    $objects.Add($object)
+)) {
+    $menuObjects.Add((Compile-CppObject (Join-Path $menuProject $source) $menuObjectRoot))
 }
-
-foreach ($source in $cppSources) {
-    $name = ($source -replace '[\\/:]', '_') + '.o'
-    $object = Join-Path $objectDirectory $name
-    $sourceFlags = $cppFlags
-    if ($source.StartsWith('vendor\imgui\')) {
-        $sourceFlags = $sourceFlags + @(
-            '-fpermissive',
-            '-Wno-error'
-        )
-    }
-    & $gxx @sourceFlags -c (Join-Path $project $source) -o $object
-    if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao compilar $source"
-    }
-    $objects.Add($object)
-}
-
-& $gxx -shared -static-libgcc -static-libstdc++ -o $output @objects `
+$menuOutput = Join-Path $buildRoot 'mod_menu.dll'
+& $gxx -shared -static-libgcc -static-libstdc++ -o $menuOutput @menuObjects `
     -ld3d12 -ldxgi -ld3dcompiler -ldxguid -lxinput9_1_0 -luser32 -lkernel32
-if ($LASTEXITCODE -ne 0) {
-    throw 'Falha ao vincular DisgaeaMayhemModMenu.dll'
-}
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_menu.dll' }
 
-# Deploy to game directories
-$targets = [System.Collections.Generic.List[string]]::new()
-$targets.Add($gameRoot.ToString())
+$loaderObjects = @(
+    (Compile-CppObject (Join-Path $loaderProject 'dxgi_proxy.cpp') $loaderObjectRoot),
+    (Compile-CppObject (Join-Path $loaderProject 'mod_loader.cpp') $loaderObjectRoot)
+)
+$loaderOutput = Join-Path $buildRoot 'dxgi.dll'
+& $gxx -shared -static-libgcc -static-libstdc++ -o $loaderOutput @loaderObjects -luser32 -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular dxgi.dll' }
 
-# Auto-discover from running process
-$proc = Get-Process -Name "Disgaea_Mayhem" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($proc) {
+$validatorObject = Compile-CppObject (Join-Path $loaderProject 'validate_main.cpp') $loaderObjectRoot
+$validatorOutput = Join-Path $buildRoot 'mod_loader_validate.exe'
+& $gxx -municode -static-libgcc -static-libstdc++ -o $validatorOutput $validatorObject $loaderObjects[1] -luser32 -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_loader_validate.exe' }
+
+$smokeRoot = Join-Path $buildRoot 'smoke-runtime'
+New-Item -ItemType Directory -Force (Join-Path $smokeRoot 'mods\mod_menu') | Out-Null
+$smokeOutput = Join-Path $smokeRoot 'mod_loader_proxy_smoke.exe'
+& $gxx @cppFlags -static -o $smokeOutput (Join-Path $loaderProject 'proxy_smoke.cpp') -lole32 -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_loader_proxy_smoke.exe' }
+
+$itemWorldOutput = Join-Path $buildRoot 'item_world.dll'
+& $gxx @cppFlags -shared -static-libgcc -static-libstdc++ -o $itemWorldOutput `
+    (Join-Path $gameRoot 'mods\item_world\item_world.cpp') -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular item_world.dll' }
+
+$charaMinHookObjects = [System.Collections.Generic.List[string]]::new()
+foreach ($source in $minHookSources) { $charaMinHookObjects.Add((Compile-CObject $source $pluginObjectRoot)) }
+$charaObject = Compile-CppObject (Join-Path $gameRoot 'mods\chara_world\chara_world.cpp') $pluginObjectRoot
+$charaWorldOutput = Join-Path $buildRoot 'chara_world.dll'
+& $gxx -shared -static-libgcc -static-libstdc++ -o $charaWorldOutput $charaObject @charaMinHookObjects -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular chara_world.dll' }
+
+$safeBackupOutput = Join-Path $buildRoot 'safe_backup.dll'
+& $gxx @cppFlags -shared -static-libgcc -static-libstdc++ -o $safeBackupOutput `
+    (Join-Path $gameRoot 'mods\safe_backup\safe_backup.cpp') -lshell32 -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular safe_backup.dll' }
+
+$modMenuInstallerOutput = Join-Path $buildRoot 'INSTALAR_MOD_MENU.exe'
+& $gxx @cppFlags -static -o $modMenuInstallerOutput `
+    (Join-Path $gameRoot 'mods\mod_menu\INSTALAR_MOD_MENU.cpp') -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular INSTALAR_MOD_MENU.exe' }
+
+$cheatShopOutput = Join-Path $buildRoot 'APLICAR_MOD_CHEAT_SHOP.exe'
+& $gxx @cppFlags -static -o $cheatShopOutput `
+    (Join-Path $gameRoot 'mods\cheat_shop\apply_cheat_shop.cpp') -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_CHEAT_SHOP.exe' }
+
+$darkAssemblyOutput = Join-Path $buildRoot 'APLICAR_MOD_DARK_ASSEMBLY.exe'
+& $gxx @cppFlags -static -o $darkAssemblyOutput `
+    (Join-Path $gameRoot 'mods\dark_assembly\apply_dark_assembly.cpp') -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_DARK_ASSEMBLY.exe' }
+
+$dlcUnlockerOutput = Join-Path $buildRoot 'APLICAR_MOD_DLC.exe'
+& $gxx @cppFlags -static -o $dlcUnlockerOutput `
+    (Join-Path $gameRoot 'mods\dlc_unlocker\apply_dlc_unlocker.cpp') -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_DLC.exe' }
+
+$target = $gameRoot.ToString()
+$deployments = @(
+    @($loaderOutput, (Join-Path $target 'dxgi.dll')),
+    @($menuOutput, (Join-Path $target 'mods\mod_menu\mod_menu.dll')),
+    @($itemWorldOutput, (Join-Path $target 'mods\item_world\item_world.dll')),
+    @($charaWorldOutput, (Join-Path $target 'mods\chara_world\chara_world.dll')),
+    @($safeBackupOutput, (Join-Path $target 'mods\safe_backup\safe_backup.dll')),
+    @($modMenuInstallerOutput, (Join-Path $target 'mods\mod_menu\INSTALAR_MOD_MENU.exe')),
+    @($cheatShopOutput, (Join-Path $target 'mods\cheat_shop\APLICAR_MOD_CHEAT_SHOP.exe')),
+    @($darkAssemblyOutput, (Join-Path $target 'mods\dark_assembly\APLICAR_MOD_DARK_ASSEMBLY.exe')),
+    @($dlcUnlockerOutput, (Join-Path $target 'mods\dlc_unlocker\APLICAR_MOD_DLC.exe'))
+)
+foreach ($deployment in $deployments) {
     try {
-        $procDir = Split-Path -Parent $proc.Path
-        if ((Test-Path (Join-Path $procDir 'Disgaea_Mayhem.exe')) -and ($targets -notcontains $procDir)) {
-            $targets.Add($procDir)
-        }
-    } catch {}
-}
-
-# Auto-discover from all mounted drives (C:, D:, E:, F:, G:, etc.)
-$drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
-foreach ($drive in $drives) {
-    $candidates = @(
-        (Join-Path $drive 'Steam\steamapps\common\Disgaea Mayhem'),
-        (Join-Path $drive 'SteamLibrary\steamapps\common\Disgaea Mayhem'),
-        (Join-Path $drive 'Program Files (x86)\Steam\steamapps\common\Disgaea Mayhem'),
-        (Join-Path $drive 'Games\Disgaea Mayhem')
-    )
-    foreach ($c in $candidates) {
-        if ((Test-Path (Join-Path $c 'Disgaea_Mayhem.exe')) -and ($targets -notcontains $c)) {
-            $targets.Add($c)
-        }
-    }
-}
-
-foreach ($target in $targets) {
-    $targetNativeDll = Join-Path $target 'mods\native\DisgaeaMayhemModMenu.dll'
-    $targetDxgiDll = Join-Path $target 'dxgi.dll'
-    
-    try {
-        New-Item -ItemType Directory -Force (Join-Path $target 'mods\native') | Out-Null
-        Copy-Item $output -Destination $targetNativeDll -Force
+        New-Item -ItemType Directory -Force (Split-Path -Parent $deployment[1]) | Out-Null
+        Copy-Item -LiteralPath $deployment[0] -Destination $deployment[1] -Force
+        Write-Host "[OK] Atualizado: $($deployment[1])"
     } catch {
-        Write-Warning "mods\native\DisgaeaMayhemModMenu.dll em uso em $target."
-    }
-
-    try {
-        Copy-Item $output -Destination $targetDxgiDll -Force
-        Write-Host "[OK] Proxy de auto-inicializacao atualizado em: $targetDxgiDll"
-    } catch {
-        Write-Warning "dxgi.dll em uso pelo jogo em $target (feche o jogo para atualizar o arquivo)."
+        throw "Falha ao implantar $($deployment[1]). Feche o jogo e tente novamente. $($_.Exception.Message)"
     }
 }
 
-Write-Host "[OK] DLL nativo compilado com sucesso: $output"
+& $validatorOutput ($gameRoot.ToString())
+if ($LASTEXITCODE -ne 0) { throw "Validador do Mod Loader falhou com codigo $LASTEXITCODE" }
+
+Copy-Item -LiteralPath $loaderOutput -Destination (Join-Path $smokeRoot 'dxgi.dll') -Force
+Copy-Item -LiteralPath $menuOutput -Destination (Join-Path $smokeRoot 'mods\mod_menu\mod_menu.dll') -Force
+Copy-Item -LiteralPath (Join-Path $gameRoot 'mods\mod_menu\mod.json') `
+    -Destination (Join-Path $smokeRoot 'mods\mod_menu\mod.json') -Force
+Copy-Item -LiteralPath (Join-Path $gameRoot 'mods\mod_menu\enabled.txt') `
+    -Destination (Join-Path $smokeRoot 'mods\mod_menu\enabled.txt') -Force
+& $smokeOutput
+if ($LASTEXITCODE -ne 0) { throw "Smoke test do proxy/loader falhou com codigo $LASTEXITCODE" }
+$smokeLog = Get-Content -Raw (Join-Path $smokeRoot 'mods\mod_loader.log')
+if ($smokeLog -notmatch 'bootstrap concluido com 1 manifesto') {
+    throw 'Smoke test nao confirmou o bootstrap isolado do system mod.'
+}
+Write-Host '[OK] Smoke test isolado do proxy/loader concluido.'
+
+Write-Host '[OK] Loader, Mod Menu e plugins ABI v1 compilados com sucesso.'

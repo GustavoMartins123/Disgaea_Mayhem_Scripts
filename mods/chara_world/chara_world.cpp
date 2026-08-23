@@ -1,204 +1,192 @@
 #include <windows.h>
 #include <stdio.h>
-#include <stdarg.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
-static HMODULE g_module = nullptr;
+#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
+#include "../../native/mod_loader/mod_loader_api.h"
+
+// -----------------------------------------------------------------------------
+// Global Chara World Mod State
+// -----------------------------------------------------------------------------
+static volatile bool g_mod_enabled = false;
+static volatile int g_target_energy = 100;
+static volatile bool g_freeze_energy = true;
+static HANDLE g_monitor_thread = NULL;
+static volatile bool g_thread_running = false;
+
+// Dynamic Base & Cached instance pointer
 static uintptr_t g_exe_base = 0;
-static volatile LONG g_enabled = 0;
-static volatile LONG g_patches_applied = 0;
+static volatile uintptr_t g_cw_info_instance = 0;
+static void* g_hook_target = nullptr;
+static bool g_minhook_initialized = false;
 
-struct PatchEntry {
-    uint32_t rva;
-    uint8_t patch[6];
-    uint8_t expected[6];
-    bool owned;
-    const char* desc;
-};
-
-static PatchEntry g_patches[] = {
-    { 0x00453075, { 0xB9, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x8B, 0x78, 0x01, 0x00, 0x00 }, false, "Calculo de Passos" },
-    { 0x0046E1F4, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x92, 0x78, 0x01, 0x00, 0x00 }, false, "Logica de Turno" },
-    { 0x004A342E, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x97, 0x78, 0x01, 0x00, 0x00 }, false, "Verificacao de Acoes" },
-    { 0x004944B3, { 0xB8, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x81, 0x78, 0x01, 0x00, 0x00 }, false, "Check Energia Restante 1" },
-    { 0x004979A6, { 0xB8, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x81, 0x78, 0x01, 0x00, 0x00 }, false, "Check Energia Restante 2" },
-    { 0x004B1D12, { 0xBF, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0xBF, 0x78, 0x01, 0x00, 0x00 }, false, "Display Visual HUD" },
-    { 0x004B1DA4, { 0xB9, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x8F, 0x78, 0x01, 0x00, 0x00 }, false, "Renderizador de HUD" },
-    { 0x004B8564, { 0xBA, 0x64, 0x00, 0x00, 0x00, 0x90 }, { 0x8B, 0x90, 0x78, 0x01, 0x00, 0x00 }, false, "Acao de Tabuleiro" }
-};
-
-static const size_t g_num_patches = sizeof(g_patches) / sizeof(g_patches[0]);
-
-static void Log(const char* fmt, ...) {
-    char dll_path[MAX_PATH] = {};
-    if (!g_module || !GetModuleFileNameA(g_module, dll_path, MAX_PATH)) return;
-    char* slash = strrchr(dll_path, '\\');
-    if (!slash) return;
-    *slash = '\0';
-
-    char log_path[MAX_PATH] = {};
-    snprintf(log_path, sizeof(log_path), "%s\\chara_world.log", dll_path);
-    FILE* f = fopen(log_path, "a");
-    if (!f) return;
-
-    SYSTEMTIME now = {};
-    GetLocalTime(&now);
-    fprintf(f, "[%02u:%02u:%02u.%03u][T%lu] ", now.wHour, now.wMinute, now.wSecond,
-            now.wMilliseconds, GetCurrentThreadId());
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(f, fmt, args);
-    va_end(args);
-    fputc('\n', f);
-    fclose(f);
-}
-
-static bool IsReadableCode(uintptr_t address, size_t size) {
+// -----------------------------------------------------------------------------
+// Safe Memory Validation
+// -----------------------------------------------------------------------------
+static inline bool IsValidMemoryRange(uintptr_t addr, size_t size) {
+    if (addr < 0x10000 || addr > 0x7FFFFFFEFFFF) return false;
     MEMORY_BASIC_INFORMATION mbi = {};
-    if (VirtualQuery((LPCVOID)address, &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
-    if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
-    const uintptr_t end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
-    return address >= (uintptr_t)mbi.BaseAddress && size <= end - address;
-}
-
-static bool BytesEqual(uintptr_t address, const uint8_t* bytes, size_t size) {
-    return IsReadableCode(address, size) && memcmp((const void*)address, bytes, size) == 0;
-}
-
-static bool WriteCode(uintptr_t address, const uint8_t* bytes, size_t size) {
-    DWORD old_protect = 0;
-    if (!VirtualProtect((LPVOID)address, size, PAGE_EXECUTE_READWRITE, &old_protect)) return false;
-    memcpy((void*)address, bytes, size);
-    FlushInstructionCache(GetCurrentProcess(), (LPCVOID)address, size);
-    DWORD ignored = 0;
-    VirtualProtect((LPVOID)address, size, old_protect, &ignored);
-    return true;
-}
-
-static bool PreflightPatches() {
-    if (!g_exe_base) g_exe_base = (uintptr_t)GetModuleHandleA(nullptr);
-    if (!g_exe_base) {
-        Log("[ERROR] Nao foi possivel obter o base address do executavel.");
-        return false;
-    }
-
-    for (size_t i = 0; i < g_num_patches; ++i) {
-        const uintptr_t address = g_exe_base + g_patches[i].rva;
-        const bool original = BytesEqual(address, g_patches[i].expected, 6);
-        const bool already_patched = BytesEqual(address, g_patches[i].patch, 6);
-        if (!original && !already_patched) {
-            uint8_t current[6] = {};
-            if (IsReadableCode(address, sizeof(current))) memcpy(current, (const void*)address, sizeof(current));
-            Log("[PREFLIGHT_ERROR] %s RVA=0x%08X bytes=%02X %02X %02X %02X %02X %02X",
-                g_patches[i].desc, g_patches[i].rva,
-                current[0], current[1], current[2], current[3], current[4], current[5]);
-            return false;
+    if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) && !(mbi.Protect & PAGE_NOACCESS)) {
+            if ((mbi.Protect & PAGE_READWRITE) || (mbi.Protect & PAGE_EXECUTE_READWRITE)) {
+                return (addr + size <= (uintptr_t)mbi.BaseAddress + mbi.RegionSize);
+            }
         }
     }
-    return true;
+    return false;
 }
 
-static bool ApplyNativeCodePatches() {
-    if (InterlockedCompareExchange(&g_patches_applied, 0, 0) != 0) return true;
-    if (!PreflightPatches()) {
-        Log("[DISABLED] Nenhum patch aplicado porque a build do jogo nao corresponde aos bytes esperados.");
-        return false;
-    }
+// -----------------------------------------------------------------------------
+// MinHook on CCharacterWorldInformation Constructor (RVA 0x004501D0)
+// -----------------------------------------------------------------------------
+typedef void* (*pfn_CWInfo_Ctor)(void* pThis, void* constructor_arg, void* allocator_arg);
+static pfn_CWInfo_Ctor o_CWInfo_Ctor = nullptr;
 
-    size_t changed = 0;
-    for (size_t i = 0; i < g_num_patches; ++i) {
-        const uintptr_t address = g_exe_base + g_patches[i].rva;
-        g_patches[i].owned = false;
-        if (BytesEqual(address, g_patches[i].patch, 6)) {
-            Log("[PATCH] %s ja estava aplicado; mantendo sem assumir ownership.", g_patches[i].desc);
-            continue;
+static void* Hook_CWInfo_Ctor(void* pThis, void* constructor_arg, void* allocator_arg) {
+    void* result = o_CWInfo_Ctor(pThis, constructor_arg, allocator_arg);
+    if (result && IsValidMemoryRange((uintptr_t)result, sizeof(uintptr_t)) &&
+        *(uintptr_t*)result == g_exe_base + 0x00A57610) {
+        g_cw_info_instance = (uintptr_t)result;
+        // Lock MaxEnergy (+0x174) and CurrentEnergy (+0x178) to target
+        if (g_mod_enabled && IsValidMemoryRange((uintptr_t)result + 0x174, 8)) {
+            *(int32_t*)((uintptr_t)result + 0x174) = g_target_energy;
+            *(int32_t*)((uintptr_t)result + 0x178) = g_target_energy;
         }
-        if (!WriteCode(address, g_patches[i].patch, 6)) {
-            Log("[PATCH_ERROR] Falha ao aplicar %s RVA=0x%08X; revertendo patches desta DLL.",
-                g_patches[i].desc, g_patches[i].rva);
-            for (size_t r = 0; r < i; ++r) {
-                if (g_patches[r].owned) {
-                    const uintptr_t restore_address = g_exe_base + g_patches[r].rva;
-                    if (BytesEqual(restore_address, g_patches[r].patch, 6)) {
-                        WriteCode(restore_address, g_patches[r].expected, 6);
+    }
+    return result;
+}
+
+// -----------------------------------------------------------------------------
+// Dedicated Energy Guardian Thread (Runs only when in Chara World)
+// -----------------------------------------------------------------------------
+static DWORD WINAPI CharaWorldMonitorThread(LPVOID lpParam) {
+    (void)lpParam;
+    g_thread_running = true;
+
+    while (g_thread_running) {
+        if (g_mod_enabled && g_freeze_energy) {
+            if (g_cw_info_instance && IsValidMemoryRange(g_cw_info_instance + 0x174, 8)) {
+                int32_t* p_max = (int32_t*)(g_cw_info_instance + 0x174);
+                int32_t* p_cur = (int32_t*)(g_cw_info_instance + 0x178);
+
+                if (*p_max == 100 || *p_max == g_target_energy) {
+                    if (*p_cur != g_target_energy) {
+                        *p_cur = g_target_energy;
                     }
-                    g_patches[r].owned = false;
+                } else {
+                    g_cw_info_instance = 0;
                 }
             }
-            return false;
         }
-        g_patches[i].owned = true;
-        ++changed;
-        Log("[PATCH] %s aplicado RVA=0x%08X", g_patches[i].desc, g_patches[i].rva);
+
+        Sleep(50);
     }
 
-    InterlockedExchange(&g_patches_applied, 1);
-    Log("[ENABLE] Chara World ativo (%zu patches escritos por esta DLL).", changed);
-    return true;
+    return 0;
 }
 
-static void RestoreNativeCodePatches() {
-    if (InterlockedCompareExchange(&g_patches_applied, 0, 0) == 0) return;
-
-    for (size_t i = 0; i < g_num_patches; ++i) {
-        if (!g_patches[i].owned) continue;
-        const uintptr_t address = g_exe_base + g_patches[i].rva;
-        if (BytesEqual(address, g_patches[i].patch, 6)) {
-            if (WriteCode(address, g_patches[i].expected, 6)) {
-                Log("[RESTORE] %s restaurado RVA=0x%08X", g_patches[i].desc, g_patches[i].rva);
-            } else {
-                Log("[RESTORE_ERROR] Falha ao restaurar %s RVA=0x%08X", g_patches[i].desc, g_patches[i].rva);
-            }
-        } else {
-            Log("[RESTORE_SKIP] %s mudou externamente; nao sobrescrevendo.", g_patches[i].desc);
-        }
-        g_patches[i].owned = false;
-    }
-
-    InterlockedExchange(&g_patches_applied, 0);
-}
-
+// -----------------------------------------------------------------------------
+// Mod Plugin Interface Exports (ABI v1)
+// -----------------------------------------------------------------------------
 extern "C" {
-    __declspec(dllexport) void Mod_Enable() {
-        if (InterlockedCompareExchange(&g_enabled, 1, 1) != 0) return;
-        if (ApplyNativeCodePatches()) {
-            InterlockedExchange(&g_enabled, 1);
-        } else {
-            InterlockedExchange(&g_enabled, 0);
+    __declspec(dllexport) uint32_t WINAPI Mod_GetAbiVersion() {
+        return DM_MOD_LOADER_ABI_VERSION;
+    }
+
+    __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
+        if (context == NULL || context->struct_size != sizeof(DmModHostContext) ||
+            context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == NULL) {
+            return FALSE;
         }
+        g_exe_base = (uintptr_t)GetModuleHandleA(NULL);
+        if (g_exe_base == 0) return FALSE;
+
+        static const uint8_t expected_prologue[] = {
+            0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C,
+            0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20, 0x57
+        };
+        g_hook_target = (void*)(g_exe_base + 0x004501D0);
+        if (memcmp(g_hook_target, expected_prologue, sizeof(expected_prologue)) != 0) {
+            if (context->loader->Log != NULL) {
+                context->loader->Log("chara_world", "Build do jogo rejeitada: prologo do construtor nao corresponde.");
+            }
+            g_hook_target = nullptr;
+            return FALSE;
+        }
+
+        if (MH_Initialize() != MH_OK) return FALSE;
+        g_minhook_initialized = true;
+        if (MH_CreateHook(g_hook_target, (LPVOID)&Hook_CWInfo_Ctor,
+                          reinterpret_cast<LPVOID*>(&o_CWInfo_Ctor)) != MH_OK ||
+            MH_EnableHook(g_hook_target) != MH_OK) {
+            MH_RemoveHook(g_hook_target);
+            MH_Uninitialize();
+            g_minhook_initialized = false;
+            g_hook_target = nullptr;
+            return FALSE;
+        }
+        return TRUE;
     }
 
-    __declspec(dllexport) void Mod_Disable() {
-        if (InterlockedExchange(&g_enabled, 0) == 0 &&
-            InterlockedCompareExchange(&g_patches_applied, 0, 0) == 0) return;
-        RestoreNativeCodePatches();
-        Log("[DISABLE] Chara World desativado.");
+    __declspec(dllexport) BOOL WINAPI Mod_Enable() {
+        g_mod_enabled = true;
+        if (!g_thread_running) {
+            g_monitor_thread = CreateThread(NULL, 0, CharaWorldMonitorThread, NULL, 0, NULL);
+            if (g_monitor_thread == NULL) {
+                g_mod_enabled = false;
+                return FALSE;
+            }
+        }
+        return TRUE;
     }
 
-    __declspec(dllexport) void* start_mod() {
-        Mod_Enable();
-        return InterlockedCompareExchange(&g_enabled, 0, 0) ? (void*)1 : nullptr;
+    __declspec(dllexport) BOOL WINAPI Mod_Disable() {
+        g_mod_enabled = false;
+        g_cw_info_instance = 0;
+        return TRUE;
     }
 
-    __declspec(dllexport) void uninstall_mod(void*) {
-        Mod_Disable();
+    __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValue* value) {
+        if (key == NULL || value == NULL || value->struct_size != sizeof(DmModValue)) return FALSE;
+        if (strcmp(key, "locked_energy") == 0) {
+            if (value->type != DmOptionType::SliderInt) return FALSE;
+            g_target_energy = value->int_value;
+        } else if (strcmp(key, "freeze_energy") == 0) {
+            if (value->type != DmOptionType::Toggle) return FALSE;
+            g_freeze_energy = value->bool_value != FALSE;
+        } else {
+            return FALSE;
+        }
+        return TRUE;
     }
 
-    __declspec(dllexport) void Mod_SetOption(const char*, int, bool) {}
-
-    __declspec(dllexport) bool Mod_IsActive() {
-        return InterlockedCompareExchange(&g_enabled, 0, 0) != 0 &&
-               InterlockedCompareExchange(&g_patches_applied, 0, 0) != 0;
+    __declspec(dllexport) void WINAPI Mod_Shutdown() {
+        g_mod_enabled = false;
+        g_thread_running = false;
+        g_cw_info_instance = 0;
+        if (g_monitor_thread != NULL) {
+            WaitForSingleObject(g_monitor_thread, 500);
+            CloseHandle(g_monitor_thread);
+            g_monitor_thread = NULL;
+        }
+        if (g_minhook_initialized) {
+            if (g_hook_target != nullptr) {
+                MH_DisableHook(g_hook_target);
+                MH_RemoveHook(g_hook_target);
+            }
+            MH_Uninitialize();
+            g_minhook_initialized = false;
+            g_hook_target = nullptr;
+        }
     }
 }
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH) {
-        g_module = hinstDLL;
-        DisableThreadLibraryCalls(hinstDLL);
-        g_exe_base = (uintptr_t)GetModuleHandleA(nullptr);
-        // DllMain intentionally stays passive. The host calls Mod_Enable outside loader lock.
-    }
+// -----------------------------------------------------------------------------
+// DLL Entry Point
+// -----------------------------------------------------------------------------
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID) {
+    if (fdwReason == DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(hinstDLL);
     return TRUE;
 }

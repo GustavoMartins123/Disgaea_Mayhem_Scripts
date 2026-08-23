@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
+#include "../../native/mod_loader/mod_loader_api.h"
 
 // -----------------------------------------------------------------------------
 // Global Mod State
@@ -21,29 +21,6 @@ static uintptr_t g_exe_base = 0;
 static uintptr_t g_vtable_item_status = 0;
 static uintptr_t g_vtable_item_world = 0;
 static volatile uintptr_t g_cached_item_world = 0;
-
-// -----------------------------------------------------------------------------
-// Read enabled.txt from mod directory
-// -----------------------------------------------------------------------------
-static bool CheckEnabledTxt() {
-    char self_path[MAX_PATH] = {};
-    HMODULE hSelf = GetModuleHandleA("item_world.dll");
-    if (!hSelf) hSelf = GetModuleHandleA(NULL);
-    GetModuleFileNameA(hSelf, self_path, MAX_PATH);
-    char* last_slash = strrchr(self_path, '\\');
-    if (last_slash) *last_slash = '\0';
-    
-    char enabled_path[MAX_PATH] = {};
-    snprintf(enabled_path, sizeof(enabled_path), "%s\\enabled.txt", self_path);
-    FILE* f = fopen(enabled_path, "r");
-    if (f) {
-        char ch = 0;
-        fread(&ch, 1, 1, f);
-        fclose(f);
-        return (ch == '1');
-    }
-    return true;
-}
 
 // -----------------------------------------------------------------------------
 // Safe Memory Access Helpers
@@ -85,17 +62,10 @@ static inline bool SafeReadPtr(uintptr_t addr, uintptr_t* out_val) {
 // Safe Monitor Thread
 // -----------------------------------------------------------------------------
 static DWORD WINAPI ItemWorldMonitorThread(LPVOID lpParam) {
+    (void)lpParam;
     g_thread_running = true;
 
-    int tick_count = 0;
-
     while (g_thread_running) {
-        if (++tick_count % 20 == 0) {
-            if (!CheckEnabledTxt()) {
-                g_mod_enabled = false;
-            }
-        }
-
         if (g_mod_enabled && g_cached_item_world) {
             uintptr_t vptr = 0;
             if (SafeReadPtr(g_cached_item_world, &vptr) && vptr == g_vtable_item_world) {
@@ -133,76 +103,82 @@ static DWORD WINAPI ItemWorldMonitorThread(LPVOID lpParam) {
 }
 
 // -----------------------------------------------------------------------------
-// Mod Plugin Interface Exports
+// Mod Plugin Interface Exports (ABI v1)
 // -----------------------------------------------------------------------------
 extern "C" {
-    __declspec(dllexport) void Mod_Enable() {
+    __declspec(dllexport) uint32_t WINAPI Mod_GetAbiVersion() {
+        return DM_MOD_LOADER_ABI_VERSION;
+    }
+
+    __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
+        if (context == NULL || context->struct_size != sizeof(DmModHostContext) ||
+            context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == NULL) {
+            return FALSE;
+        }
+        g_exe_base = (uintptr_t)GetModuleHandleA(NULL);
+        if (g_exe_base == 0) return FALSE;
+        g_vtable_item_status = g_exe_base + 0xA252C0;
+        g_vtable_item_world = g_exe_base + 0xA251F0;
+
+        // No constructor/factory hook currently captures CItemWorldData, so the
+        // previous plugin could never populate g_cached_item_world. Reject the
+        // plugin explicitly instead of reporting a resident but inert mod.
+        if (context->loader->Log != NULL) {
+            context->loader->Log("item_world", "Inicializacao rejeitada: captura de CItemWorldData nao implementada.");
+        }
+        return FALSE;
+    }
+
+    __declspec(dllexport) BOOL WINAPI Mod_Enable() {
         g_mod_enabled = true;
         if (!g_thread_running) {
             g_monitor_thread = CreateThread(NULL, 0, ItemWorldMonitorThread, NULL, 0, NULL);
+            if (g_monitor_thread == NULL) {
+                g_mod_enabled = false;
+                return FALSE;
+            }
         }
+        return TRUE;
     }
 
-    __declspec(dllexport) void Mod_Disable() {
+    __declspec(dllexport) BOOL WINAPI Mod_Disable() {
         g_mod_enabled = false;
         g_cached_item_world = 0;
+        return TRUE;
     }
 
-    __declspec(dllexport) void* start_mod() {
-        Mod_Enable();
-        return (void*)1;
-    }
-
-    __declspec(dllexport) void uninstall_mod(void*) {
-        Mod_Disable();
-    }
-
-    __declspec(dllexport) void Mod_SetOption(const char* key, int int_val, bool bool_val) {
-        if (!key) return;
+    __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValue* value) {
+        if (key == NULL || value == NULL || value->struct_size != sizeof(DmModValue)) return FALSE;
         if (strcmp(key, "levels_per_floor") == 0) {
-            g_levels_per_floor = int_val;
+            if (value->type != DmOptionType::SliderInt) return FALSE;
+            g_levels_per_floor = value->int_value;
         } else if (strcmp(key, "auto_subdue") == 0) {
-            g_auto_subdue = bool_val;
+            if (value->type != DmOptionType::Toggle) return FALSE;
+            g_auto_subdue = value->bool_value != FALSE;
         } else if (strcmp(key, "mystery_room_rate") == 0) {
-            g_mystery_room_rate = int_val;
+            if (value->type != DmOptionType::SliderInt) return FALSE;
+            g_mystery_room_rate = value->int_value;
+        } else {
+            return FALSE;
         }
+        return TRUE;
     }
 
-    __declspec(dllexport) bool Mod_IsActive() {
-        return g_mod_enabled && g_thread_running;
+    __declspec(dllexport) void WINAPI Mod_Shutdown() {
+        g_mod_enabled = false;
+        g_thread_running = false;
+        if (g_monitor_thread != NULL) {
+            WaitForSingleObject(g_monitor_thread, 500);
+            CloseHandle(g_monitor_thread);
+            g_monitor_thread = NULL;
+        }
     }
 }
 
 // -----------------------------------------------------------------------------
 // DLL Entry Point
 // -----------------------------------------------------------------------------
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
-    switch (fdwReason) {
-        case DLL_PROCESS_ATTACH: {
-            DisableThreadLibraryCalls(hinstDLL);
-
-            g_exe_base = (uintptr_t)GetModuleHandleA(NULL);
-            if (!g_exe_base) g_exe_base = 0x140000000;
-
-            g_vtable_item_status = g_exe_base + 0xA252C0;
-            g_vtable_item_world = g_exe_base + 0xA251F0;
-
-            if (CheckEnabledTxt()) {
-                Mod_Enable();
-            } else {
-                Mod_Disable();
-            }
-            break;
-        }
-        case DLL_PROCESS_DETACH:
-            g_thread_running = false;
-            g_mod_enabled = false;
-            if (g_monitor_thread) {
-                WaitForSingleObject(g_monitor_thread, 200);
-                CloseHandle(g_monitor_thread);
-                g_monitor_thread = NULL;
-            }
-            break;
-    }
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID) {
+    if (fdwReason == DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(hinstDLL);
     return TRUE;
 }

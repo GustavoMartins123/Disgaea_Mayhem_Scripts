@@ -492,10 +492,14 @@ void ImGui_ImplDX12_UpdateTexture(ImTextureData* tex)
             HRESULT hr = bd->pd3dDevice->CreateCommittedResource(&props, D3D12_HEAP_FLAG_NONE, &desc,
                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&bd->pTexUploadBuffer));
             IM_ASSERT(SUCCEEDED(hr));
+            if (FAILED(hr))
+                return;
 
             D3D12_RANGE range = {0, upload_size};
             hr = bd->pTexUploadBuffer->Map(0, &range, &bd->pTexUploadBufferMapped);
             IM_ASSERT(SUCCEEDED(hr));
+            if (FAILED(hr))
+                return;
             bd->pTexUploadBufferSize = upload_size;
         }
 
@@ -548,10 +552,14 @@ void ImGui_ImplDX12_UpdateTexture(ImTextureData* tex)
 
         HRESULT hr = cmdList->Close();
         IM_ASSERT(SUCCEEDED(hr));
+        if (FAILED(hr))
+            return;
         ID3D12CommandQueue* cmdQueue = bd->pCommandQueue;
         cmdQueue->ExecuteCommandLists(1, (ID3D12CommandList* const*)&cmdList);
         hr = cmdQueue->Signal(bd->Fence, ++bd->FenceLastSignaledValue);
         IM_ASSERT(SUCCEEDED(hr));
+        if (FAILED(hr))
+            return;
 
         // FIXME-OPT: Suboptimal?
         // - To remove this may need to create NumFramesInFlight x ImGui_ImplDX12_FrameContext in backend data (mimick docking version)
@@ -577,6 +585,8 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
 
     HRESULT hr = ::CreateDXGIFactory1(IID_PPV_ARGS(&bd->pdxgiFactory));
     IM_ASSERT(hr == S_OK);
+    if (FAILED(hr))
+        return false;
 
     BOOL allow_tearing = FALSE;
     bd->pdxgiFactory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allow_tearing, sizeof(allow_tearing));
@@ -625,33 +635,17 @@ bool    ImGui_ImplDX12_CreateDeviceObjects()
         desc.pParameters = param;
         desc.NumStaticSamplers = 1;
         desc.pStaticSamplers = &staticSampler[0];
-        desc.Flags =
+        desc.Flags = static_cast<D3D12_ROOT_SIGNATURE_FLAGS>(
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
             D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
             D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+            D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS);
 
-        // Load d3d12.dll and D3D12SerializeRootSignature() function address dynamically to facilitate using with D3D12On7.
-        // See if any version of d3d12.dll is already loaded in the process. If so, give preference to that.
-        static HINSTANCE d3d12_dll = ::GetModuleHandleA("d3d12.dll");
+        // Disgaea Mayhem targets the canonical Windows D3D12 runtime only. Do not
+        // probe local D3D12On7 copies or alternate directories.
+        static HINSTANCE d3d12_dll = ::LoadLibraryExA("d3d12.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (d3d12_dll == nullptr)
-        {
-            // Attempt to load d3d12.dll from local directories. This will only succeed if
-            // (1) the current OS is Windows 7, and
-            // (2) there exists a version of d3d12.dll for Windows 7 (D3D12On7) in one of the following directories.
-            // See https://github.com/ocornut/imgui/pull/3696 for details.
-            const char* localD3d12Paths[] = { ".\\d3d12.dll", ".\\d3d12on7\\d3d12.dll", ".\\12on7\\d3d12.dll" }; // A. current directory, B. used by some games, C. used in Microsoft D3D12On7 sample
-            for (int i = 0; i < IM_COUNTOF(localD3d12Paths); i++)
-                if ((d3d12_dll = ::LoadLibraryA(localD3d12Paths[i])) != nullptr)
-                    break;
-
-            // If failed, we are on Windows >= 10.
-            if (d3d12_dll == nullptr)
-                d3d12_dll = ::LoadLibraryA("d3d12.dll");
-
-            if (d3d12_dll == nullptr)
-                return false;
-        }
+            return false;
 
         _PFN_D3D12_SERIALIZE_ROOT_SIGNATURE D3D12SerializeRootSignatureFn = (_PFN_D3D12_SERIALIZE_ROOT_SIGNATURE)(void*)::GetProcAddress(d3d12_dll, "D3D12SerializeRootSignature");
         if (D3D12SerializeRootSignatureFn == nullptr)
@@ -967,8 +961,15 @@ bool ImGui_ImplDX12_Init(ID3D12Device* device, int num_frames_in_flight, DXGI_FO
     queueDesc.NodeMask = 1;
     HRESULT hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&init_info.CommandQueue));
     IM_ASSERT(SUCCEEDED(hr));
+    if (FAILED(hr))
+        return false;
 
     bool ret = ImGui_ImplDX12_Init(&init_info);
+    if (!ret)
+    {
+        init_info.CommandQueue->Release();
+        return false;
+    }
     ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
     bd->commandQueueOwned = true;
     ImGuiIO& io = ImGui::GetIO();
