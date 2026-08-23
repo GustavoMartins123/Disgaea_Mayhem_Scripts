@@ -62,6 +62,15 @@ Na conclusão, o jogo faz três operações independentes:
 
 Depois disso, o próprio jogo atualiza os atributos do item.
 
+## Raridade dos equipamentos
+
+A rotina RVA `0x001D58A0` gera a raridade entre `0` e `100`. O jogo separa esse
+valor nas faixas `0–24`, `25–49`, `50–99` e `100`.
+
+No fluxo de recompensas do Item World, a chamada ocorre em RVA `0x003C64CE`. O
+plugin reconhece somente essa chamada e pode elevar o resultado até a raridade
+mínima escolhida. As outras chamadas do jogo continuam usando o valor normal.
+
 ## Multiplicadores do plugin
 
 O plugin oferece dois controles independentes. Cada controle possui uma chave
@@ -73,10 +82,15 @@ para ativar o cálculo e um valor para definir a multiplicação:
 | `level_exp_multiplier` | pontos de nível aplicados pela rotina RVA `0x001D77E0` |
 | `item_points_enabled` | ativa ou desativa a multiplicação de Item Points |
 | `item_point_multiplier` | entradas recebidas pela rotina RVA `0x001D7BD0` |
+| `rarity_enabled` | ativa ou desativa a raridade mínima das recompensas |
+| `minimum_rarity` | valor mínimo entre `0` e `100` para equipamentos obtidos |
 
 O padrão é `1.0`, que mantém o cálculo original. O plugin não altera os contadores de
 chefes nem o resultado já salvo. Se a versão do executável ou os dados da sessão
 não corresponderem ao esperado, o plugin não aplica a mudança.
+
+Os Item Points e a quantidade de equipamentos usam caminhos separados. O
+multiplicador de Item Points não altera a quantidade nem a raridade dos drops.
 
 ## Outros dados encontrados
 

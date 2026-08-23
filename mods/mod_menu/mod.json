@@ -3,7 +3,7 @@
   "id": "mod_menu",
   "name": "Disgaea Mayhem Mod Menu",
   "category": "Sistema",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "Disgaea Mayhem Mod Team",
   "description": "Interface do Mod Loader com ajuste ao tamanho da tela e bloqueio dos comandos do jogo enquanto aberta.",
   "type": "system",

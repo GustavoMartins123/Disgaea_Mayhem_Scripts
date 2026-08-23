@@ -17,6 +17,8 @@ namespace {
 
 constexpr std::uintptr_t kApplyRewardsRva = 0x001D77E0;
 constexpr std::uintptr_t kAccumulateItemPointsRva = 0x001D7BD0;
+constexpr std::uintptr_t kGenerateRarityRva = 0x001D58A0;
+constexpr std::uintptr_t kItemWorldRarityReturnRva = 0x003C64D3;
 constexpr std::uintptr_t kItemWorldVtableRva = 0x00A251F0;
 constexpr std::size_t kLevelProgressOffset = 0x68;
 constexpr DWORD kExpectedTimestamp = 0x6A6AB373;
@@ -25,18 +27,23 @@ constexpr LONG kMultiplierScale = 1000;
 
 using ApplyRewardsFn = void (*)(void* item_world, void* result_context);
 using AccumulateItemPointsFn = void (*)(void* item_world, std::int64_t base_points);
+using GenerateRarityFn = std::int32_t (*)(const std::int32_t* parameters);
 
 std::uintptr_t g_exe_base = 0;
 void* g_apply_rewards_target = nullptr;
 void* g_accumulate_item_points_target = nullptr;
+void* g_generate_rarity_target = nullptr;
 ApplyRewardsFn g_original_apply_rewards = nullptr;
 AccumulateItemPointsFn g_original_accumulate_item_points = nullptr;
+GenerateRarityFn g_original_generate_rarity = nullptr;
 bool g_minhook_initialized = false;
 volatile LONG g_enabled = FALSE;
 volatile LONG g_level_multiplier_enabled = TRUE;
 volatile LONG g_item_point_multiplier_enabled = TRUE;
+volatile LONG g_rarity_enabled = FALSE;
 volatile LONG g_level_multiplier_scaled = kMultiplierScale;
 volatile LONG g_item_point_multiplier_scaled = kMultiplierScale;
+volatile LONG g_minimum_rarity = 50;
 volatile LONG g_invalid_object_logged = FALSE;
 std::atomic<LONG> g_active_calls{0};
 std::atomic<bool> g_shutting_down{false};
@@ -181,6 +188,24 @@ void HookAccumulateItemPoints(void* item_world, std::int64_t base_points) {
                                      ScalePositiveValue(base_points, multiplier));
 }
 
+std::int32_t HookGenerateRarity(const std::int32_t* parameters) {
+    HookScope scope;
+    if (g_original_generate_rarity == nullptr) return -1;
+
+    const auto return_address = reinterpret_cast<std::uintptr_t>(__builtin_return_address(0));
+    std::int32_t rarity = g_original_generate_rarity(parameters);
+    if (g_shutting_down.load(std::memory_order_acquire) ||
+        InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE ||
+        InterlockedCompareExchange(&g_rarity_enabled, FALSE, FALSE) == FALSE ||
+        return_address != g_exe_base + kItemWorldRarityReturnRva ||
+        rarity < 0 || rarity > 100) {
+        return rarity;
+    }
+
+    const LONG minimum = InterlockedCompareExchange(&g_minimum_rarity, 0, 0);
+    return rarity < minimum ? minimum : rarity;
+}
+
 bool InstallHooks() {
     static const std::uint8_t expected_apply_prologue[] = {
         0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x56, 0x57,
@@ -190,10 +215,15 @@ bool InstallHooks() {
         0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74,
         0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x41
     };
+    static const std::uint8_t expected_rarity_prologue[] = {
+        0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x11,
+        0x33, 0xC0, 0x48, 0x8B, 0xD9, 0x85, 0xD2, 0x0F
+    };
 
     g_apply_rewards_target = reinterpret_cast<void*>(g_exe_base + kApplyRewardsRva);
     g_accumulate_item_points_target =
         reinterpret_cast<void*>(g_exe_base + kAccumulateItemPointsRva);
+    g_generate_rarity_target = reinterpret_cast<void*>(g_exe_base + kGenerateRarityRva);
     if (!IsReadableRange(reinterpret_cast<std::uintptr_t>(g_apply_rewards_target),
                          sizeof(expected_apply_prologue)) ||
         std::memcmp(g_apply_rewards_target, expected_apply_prologue,
@@ -201,9 +231,14 @@ bool InstallHooks() {
         !IsReadableRange(reinterpret_cast<std::uintptr_t>(g_accumulate_item_points_target),
                          sizeof(expected_item_points_prologue)) ||
         std::memcmp(g_accumulate_item_points_target, expected_item_points_prologue,
-                    sizeof(expected_item_points_prologue)) != 0) {
+                    sizeof(expected_item_points_prologue)) != 0 ||
+        !IsReadableRange(reinterpret_cast<std::uintptr_t>(g_generate_rarity_target),
+                         sizeof(expected_rarity_prologue)) ||
+        std::memcmp(g_generate_rarity_target, expected_rarity_prologue,
+                    sizeof(expected_rarity_prologue)) != 0) {
         g_apply_rewards_target = nullptr;
         g_accumulate_item_points_target = nullptr;
+        g_generate_rarity_target = nullptr;
         return false;
     }
 
@@ -214,18 +249,26 @@ bool InstallHooks() {
         MH_CreateHook(g_accumulate_item_points_target,
                       reinterpret_cast<LPVOID>(&HookAccumulateItemPoints),
                       reinterpret_cast<LPVOID*>(&g_original_accumulate_item_points)) != MH_OK ||
+        MH_CreateHook(g_generate_rarity_target,
+                      reinterpret_cast<LPVOID>(&HookGenerateRarity),
+                      reinterpret_cast<LPVOID*>(&g_original_generate_rarity)) != MH_OK ||
         MH_EnableHook(g_apply_rewards_target) != MH_OK ||
-        MH_EnableHook(g_accumulate_item_points_target) != MH_OK) {
+        MH_EnableHook(g_accumulate_item_points_target) != MH_OK ||
+        MH_EnableHook(g_generate_rarity_target) != MH_OK) {
         MH_DisableHook(g_apply_rewards_target);
         MH_DisableHook(g_accumulate_item_points_target);
+        MH_DisableHook(g_generate_rarity_target);
         MH_RemoveHook(g_apply_rewards_target);
         MH_RemoveHook(g_accumulate_item_points_target);
+        MH_RemoveHook(g_generate_rarity_target);
         MH_Uninitialize();
         g_original_apply_rewards = nullptr;
         g_original_accumulate_item_points = nullptr;
+        g_original_generate_rarity = nullptr;
         g_minhook_initialized = false;
         g_apply_rewards_target = nullptr;
         g_accumulate_item_points_target = nullptr;
+        g_generate_rarity_target = nullptr;
         return false;
     }
     return true;
@@ -238,16 +281,20 @@ void RemoveHooks() {
     if (g_accumulate_item_points_target != nullptr) {
         MH_DisableHook(g_accumulate_item_points_target);
     }
+    if (g_generate_rarity_target != nullptr) MH_DisableHook(g_generate_rarity_target);
     while (g_active_calls.load(std::memory_order_acquire) != 0) Sleep(0);
     if (g_apply_rewards_target != nullptr) MH_RemoveHook(g_apply_rewards_target);
     if (g_accumulate_item_points_target != nullptr) {
         MH_RemoveHook(g_accumulate_item_points_target);
     }
+    if (g_generate_rarity_target != nullptr) MH_RemoveHook(g_generate_rarity_target);
     MH_Uninitialize();
     g_original_apply_rewards = nullptr;
     g_original_accumulate_item_points = nullptr;
+    g_original_generate_rarity = nullptr;
     g_apply_rewards_target = nullptr;
     g_accumulate_item_points_target = nullptr;
+    g_generate_rarity_target = nullptr;
     g_minhook_initialized = false;
 }
 
@@ -273,7 +320,7 @@ __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context
     g_exe_base = reinterpret_cast<std::uintptr_t>(executable);
     g_shutting_down.store(false, std::memory_order_release);
     if (!InstallHooks()) {
-        if (g_log != nullptr) g_log("item_world", "Falha ao validar ou instalar o hook de recompensas.");
+        if (g_log != nullptr) g_log("item_world", "Falha ao validar ou instalar os hooks do Item World.");
         g_exe_base = 0;
         return FALSE;
     }
@@ -305,6 +352,19 @@ __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValu
             (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
         InterlockedExchange(&g_item_point_multiplier_enabled,
                             value->bool_value != FALSE ? TRUE : FALSE);
+        return TRUE;
+    }
+    if (std::strcmp(key, "rarity_enabled") == 0) {
+        if (value->type != DmOptionType::Toggle ||
+            (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
+        InterlockedExchange(&g_rarity_enabled,
+                            value->bool_value != FALSE ? TRUE : FALSE);
+        return TRUE;
+    }
+    if (std::strcmp(key, "minimum_rarity") == 0) {
+        if (value->type != DmOptionType::SliderInt ||
+            value->int_value < 0 || value->int_value > 100) return FALSE;
+        InterlockedExchange(&g_minimum_rarity, value->int_value);
         return TRUE;
     }
 
