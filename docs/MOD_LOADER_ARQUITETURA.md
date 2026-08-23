@@ -91,17 +91,17 @@ Nao existe registro agregado, descoberta de qualquer DLL, nome inferido de execu
 }
 ```
 
-O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar, sobrar ou aparecer duplicada. Tipos, intervalos e numeros finitos sao validados antes de carregar a DLL. Em runtime, a configuracao validada fica em RAM. Alteracoes sao persistidas por `config.json.tmp` e `MoveFileExW`; se a gravacao falhar, o valor anterior e reaplicado ao plugin. Se o rollback tambem falhar, o mod e desativado e marcado como falho.
+O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar, sobrar ou aparecer duplicada. Tipos, intervalos e numeros finitos sao validados antes de carregar a DLL. Em runtime, a configuracao validada fica em RAM. Durante o arraste de um slider, o novo valor e aplicado ao plugin sem gravacao por quadro. O `config.json` e persistido ao encerrar a edicao ou fechar o menu, usando `config.json.tmp` e `MoveFileExW`. Se a gravacao falhar, o ultimo valor persistido e reaplicado ao plugin. Se o rollback tambem falhar, o mod e desativado e marcado como falho.
 
 ## Estado atual dos mods
 
 - `mod_menu`: system mod ABI v1; nao gerencia DLLs.
 - `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
-- `safe_backup`: uma unica worker, evento de parada e backups dentro da pasta do mod.
-- `item_world`: multiplica separadamente os pontos de nível e os Item Points. Os demais resultados continuam sob controle do jogo.
+- `safe_backup`: uma unica worker, evento de parada, backup inicial e novos backups quando `save.002` muda.
+- `item_world`: multiplica separadamente os pontos de nível e os Item Points e pode impor uma raridade mínima somente aos equipamentos obtidos no Item World.
 - `cheat_shop`: toggle residente que mantém os cinco valores em 5000 e restaura os anteriores ao ser desativado, sem alterar o banco local ou o save.
 - `dark_assembly`: toggle residente que garante a aprovação em memória e não altera `wish.dat`.
-- `dlc_unlocker`: action nativa com executável e estado final declarados.
+- `dlc_unlocker`: toggle residente que confirma em memória o consumo das definições `1` a `5` injetadas pelo SmokeAPI.
 
 Os arquivos `data/script/*.lub` sao artefatos Lua compilados da engine. Nao existem fontes `.lua` de mods neste repositorio e o loader nao anuncia um runtime Lua inexistente.
 
@@ -112,3 +112,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File native/mod_menu_overlay/buil
 ```
 
 O build implanta separadamente loader, Mod Menu e plugins ABI v1. Ao final, `mod_loader_validate.exe` valida schema, arquivos e exports sem executar actions. Depois, um smoke test cria uma raiz isolada apenas com o proxy e o system mod, chama `CreateDXGIFactory1` e confirma no log que os hooks e o bootstrap foram concluidos.
+
+O mesmo build compila `INSTALAR_MOD.exe`, monta uma distribuicao por lista
+fechada, valida os sete manifestos dentro dela e testa duas instalacoes isoladas:
+uma instalacao limpa e uma atualizacao que precisa preservar configuracao e
+estado. O ZIP do Nexus so substitui o anterior depois dessas verificacoes.

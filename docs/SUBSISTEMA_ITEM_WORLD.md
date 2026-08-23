@@ -73,8 +73,8 @@ mínima escolhida. As outras chamadas do jogo continuam usando o valor normal.
 
 ## Multiplicadores do plugin
 
-O plugin oferece dois controles independentes. Cada controle possui uma chave
-para ativar o cálculo e um valor para definir a multiplicação:
+O plugin oferece três grupos independentes: progresso de nível, Item Points e
+raridade mínima. Cada grupo possui uma chave de ativação e um valor:
 
 | Opção | Onde atua |
 | --- | --- |
@@ -103,7 +103,7 @@ O executável registra bancos separados para:
 
 Também existem os campos `roomID_`, `pItemWorldRoomData_`, `defeatInnocent_` e a
 classe `CInnocentStatus`. Eles confirmam que salas e Innocents usam fluxos
-separados dos dois ganhos já implementados.
+separados dos recursos já implementados.
 
 Ainda falta localizar com segurança:
 

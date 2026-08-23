@@ -25,6 +25,11 @@ O mod mantém as tabelas originais e confirma em memória somente o consumo dest
 
 Outros itens continuam no fluxo normal.
 
+O plugin é um toggle residente. Enquanto está ativado, aceita somente uma
+unidade das definições `1` a `5`. Ao ser desativado, deixa de confirmar essas
+operações e o jogo volta a consultar o inventário Steam. O plugin não cria as
+cinco entradas; essa responsabilidade permanece no SmokeAPI.
+
 ## Pontos confirmados
 
 | Elemento | RVA / campo | Uso |

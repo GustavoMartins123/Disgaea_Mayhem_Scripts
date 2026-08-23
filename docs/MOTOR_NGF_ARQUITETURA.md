@@ -34,6 +34,7 @@ atrás do menu.
 
 ## Renderização
 
-O Mod Menu é desenhado sobre o DirectX 12 pelo proxy `dxgi.dll`. O proxy também
-inicia o Mod Loader. A interface apenas envia pedidos ao loader; ela não procura
-mods nem carrega plugins por conta própria.
+O proxy `dxgi.dll` inicia o Mod Loader e carrega o system mod obrigatório. A DLL
+`mods/mod_menu/mod_menu.dll` instala os hooks DirectX 12 e desenha a interface.
+Ela apenas envia pedidos ao loader; não procura mods nem carrega plugins por
+conta própria.

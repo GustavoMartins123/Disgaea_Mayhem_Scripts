@@ -191,26 +191,71 @@ DWORD SafeXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
     return ERROR_DEVICE_NOT_CONNECTED;
 }
 
-bool ControllerBDown() {
-    for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
-        XINPUT_STATE state = {};
-        const DWORD result = SafeXInputGetState(index, &state);
-        if (result == ERROR_SUCCESS && (state.Gamepad.wButtons & XINPUT_GAMEPAD_B) != 0) {
-            return true;
-        }
+constexpr ULONGLONG PAD_RESCAN_INTERVAL_MS = 1000;
+
+struct InputSnapshot {
+    WORD pad_buttons = 0;
+    SHORT lx = 0;
+    SHORT ly = 0;
+    SHORT rx = 0;
+    SHORT ry = 0;
+    bool pad_menu_hotkey = false;
+    bool pad_b = false;
+    bool key_menu_hotkey = false;
+    bool key_escape = false;
+};
+
+InputSnapshot g_input = {};
+DWORD g_connected_pad_slots = 0;
+ULONGLONG g_next_pad_rescan = 0;
+
+void PollInput() {
+    InputSnapshot snapshot = {};
+    snapshot.key_escape = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    snapshot.key_menu_hotkey = (GetAsyncKeyState(VK_F1) & 0x8000) != 0 ||
+                               (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0 ||
+                               (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+
+    const ULONGLONG now = GetTickCount64();
+    const bool rescan = now >= g_next_pad_rescan;
+    if (rescan) {
+        g_next_pad_rescan = now + PAD_RESCAN_INTERVAL_MS;
     }
-    return false;
+
+    for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
+        const DWORD slot = 1u << index;
+        if ((g_connected_pad_slots & slot) == 0 && !rescan) {
+            continue;
+        }
+        XINPUT_STATE state = {};
+        if (SafeXInputGetState(index, &state) != ERROR_SUCCESS) {
+            g_connected_pad_slots &= ~slot;
+            continue;
+        }
+        g_connected_pad_slots |= slot;
+
+        const WORD buttons = state.Gamepad.wButtons;
+        snapshot.pad_buttons |= buttons;
+        snapshot.pad_b = snapshot.pad_b || (buttons & XINPUT_GAMEPAD_B) != 0;
+        // L3 + R3 (both thumbsticks clicked) OR Select / Back button
+        const bool thumbs = (buttons & XINPUT_GAMEPAD_LEFT_THUMB) != 0 &&
+                            (buttons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
+        snapshot.pad_menu_hotkey = snapshot.pad_menu_hotkey || thumbs ||
+                                   (buttons & XINPUT_GAMEPAD_BACK) != 0;
+
+        if (std::abs(state.Gamepad.sThumbLX) > std::abs(snapshot.lx)) snapshot.lx = state.Gamepad.sThumbLX;
+        if (std::abs(state.Gamepad.sThumbLY) > std::abs(snapshot.ly)) snapshot.ly = state.Gamepad.sThumbLY;
+        if (std::abs(state.Gamepad.sThumbRX) > std::abs(snapshot.rx)) snapshot.rx = state.Gamepad.sThumbRX;
+        if (std::abs(state.Gamepad.sThumbRY) > std::abs(snapshot.ry)) snapshot.ry = state.Gamepad.sThumbRY;
+    }
+    g_input = snapshot;
 }
 
-bool EscapeDown() {
-    return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
-}
+bool ControllerBDown() { return g_input.pad_b; }
 
-bool ModMenuHotkeyKeyboardDown() {
-    return (GetAsyncKeyState(VK_F1) & 0x8000) != 0 ||
-           (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0 ||
-           (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
-}
+bool EscapeDown() { return g_input.key_escape; }
+
+bool ModMenuHotkeyKeyboardDown() { return g_input.key_menu_hotkey; }
 
 bool ModMenuHotkeyKeyboardPressed() {
     static bool was_pressed = false;
@@ -220,20 +265,7 @@ bool ModMenuHotkeyKeyboardPressed() {
     return triggered;
 }
 
-bool ModMenuHotkeyGamepadDown() {
-    for (DWORD index = 0; index < XUSER_MAX_COUNT; ++index) {
-        XINPUT_STATE state = {};
-        if (SafeXInputGetState(index, &state) == ERROR_SUCCESS) {
-            const WORD b = state.Gamepad.wButtons;
-            // L3 + R3 (both thumbsticks clicked) OR Select / Back button
-            if ((((b & XINPUT_GAMEPAD_LEFT_THUMB) != 0) && ((b & XINPUT_GAMEPAD_RIGHT_THUMB) != 0)) ||
-                ((b & XINPUT_GAMEPAD_BACK) != 0)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
+bool ModMenuHotkeyGamepadDown() { return g_input.pad_menu_hotkey; }
 
 bool ModMenuHotkeyGamepadPressed() {
     static bool was_pressed = false;
@@ -909,8 +941,10 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
 }
 
 void ScanAndDiscoverMods();
+void FlushAllModConfigs();
 
 void UpdateOverlayState() {
+    PollInput();
     const bool was_visible = g_overlay_visible.load(std::memory_order_acquire);
     if (g_shared != nullptr && g_shared->open_request != 0) {
         g_shared->open_request = 0;
@@ -941,8 +975,12 @@ void UpdateOverlayState() {
         g_waiting_for_back_release.store(false, std::memory_order_release);
     }
 
-    if (!was_visible && g_overlay_visible.load(std::memory_order_acquire)) {
+    const bool visible = g_overlay_visible.load(std::memory_order_acquire);
+    if (!was_visible && visible) {
         ScanAndDiscoverMods();
+    }
+    if (was_visible && !visible) {
+        FlushAllModConfigs();
     }
 }
 
@@ -1075,7 +1113,7 @@ void NotifyModToggle(ModItem& mod) {
     RefreshModFromLoader(mod);
 }
 
-void NotifyModOptionChanged(ModItem& mod, const ModOption& option) {
+void ApplyModOption(ModItem& mod, const ModOption& option) {
     if (g_loader_api == nullptr || g_loader_api->SetModOption == nullptr) {
         std::snprintf(mod.status, sizeof(mod.status), "ERRO: API do loader indisponivel.");
         return;
@@ -1095,7 +1133,25 @@ void NotifyModOptionChanged(ModItem& mod, const ModOption& option) {
     if (g_loader_api->SetModOption(mod.id, option.id, &value) == FALSE) {
         std::snprintf(mod.status, sizeof(mod.status), "ERRO: opcao rejeitada pelo mod.");
     }
+}
+
+void CommitModOptions(ModItem& mod) {
+    if (g_loader_api != nullptr && g_loader_api->FlushModConfig != nullptr &&
+        g_loader_api->FlushModConfig(mod.id) == FALSE) {
+        std::snprintf(mod.status, sizeof(mod.status), "ERRO: falha ao gravar config.json.");
+    }
     RefreshModFromLoader(mod);
+}
+
+void NotifyModOptionChanged(ModItem& mod, const ModOption& option) {
+    ApplyModOption(mod, option);
+    CommitModOptions(mod);
+}
+
+void FlushAllModConfigs() {
+    if (g_loader_api != nullptr && g_loader_api->FlushModConfig != nullptr) {
+        g_loader_api->FlushModConfig(nullptr);
+    }
 }
 
 void ScanAndDiscoverMods() {
@@ -1138,19 +1194,10 @@ void ProcessGamepadNavigation(float /*dt*/) {
         return;
     }
 
-    WORD buttons = 0;
-    SHORT lx = 0, ly = 0;
-    SHORT rx = 0, ry = 0;
-    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) {
-        XINPUT_STATE state = {};
-        if (SafeXInputGetState(i, &state) == ERROR_SUCCESS) {
-            buttons |= state.Gamepad.wButtons;
-            if (std::abs(state.Gamepad.sThumbLX) > std::abs(lx)) lx = state.Gamepad.sThumbLX;
-            if (std::abs(state.Gamepad.sThumbLY) > std::abs(ly)) ly = state.Gamepad.sThumbLY;
-            if (std::abs(state.Gamepad.sThumbRX) > std::abs(rx)) rx = state.Gamepad.sThumbRX;
-            if (std::abs(state.Gamepad.sThumbRY) > std::abs(ry)) ry = state.Gamepad.sThumbRY;
-        }
-    }
+    const WORD buttons = g_input.pad_buttons;
+    const SHORT lx = g_input.lx;
+    const SHORT ly = g_input.ly;
+    const SHORT ry = g_input.ry;
 
     g_gp_nav.right_stick_scroll = (std::abs(ry) > 6000) ? (static_cast<float>(ry) / 32768.0f) : 0.0f;
 
@@ -1615,9 +1662,12 @@ void BuildOverlay(const ImVec2& display_size) {
                         150.0f * ui_scale,
                         ImGui::GetContentRegionAvail().x - 20.0f * ui_scale));
                     if (ImGui::SliderInt("##slider", &opt.int_val, opt.min_int, opt.max_int)) {
-                        NotifyModOptionChanged(mod, opt);
+                        ApplyModOption(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                         g_gp_nav.focused_option = static_cast<int>(j + 1);
+                    }
+                    if (ImGui::IsItemDeactivatedAfterEdit()) {
+                        CommitModOptions(mod);
                     }
                     ImGui::PopItemWidth();
                 } else if (opt.type == OptionType::SliderFloat) {
@@ -1632,9 +1682,12 @@ void BuildOverlay(const ImVec2& display_size) {
                         150.0f * ui_scale,
                         ImGui::GetContentRegionAvail().x - 20.0f * ui_scale));
                     if (ImGui::SliderFloat("##slider", &opt.float_val, opt.min_float, opt.max_float, "%.1f")) {
-                        NotifyModOptionChanged(mod, opt);
+                        ApplyModOption(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                         g_gp_nav.focused_option = static_cast<int>(j + 1);
+                    }
+                    if (ImGui::IsItemDeactivatedAfterEdit()) {
+                        CommitModOptions(mod);
                     }
                     ImGui::PopItemWidth();
                 }

@@ -9,6 +9,10 @@ ficam em `5000%`:
 - Weapon Mastery;
 - Item Drops.
 
+Os cinco valores são aplicados juntos e não possuem controles separados. Item
+Drops também influencia a quantidade de recompensas; em `5000%`, algumas telas
+podem receber listas muito maiores que no jogo normal.
+
 O mod não altera `data/database/cheatSetting.dat`. Os valores anteriores ficam
 guardados em memória e são restaurados quando o mod é desativado.
 Se a tela da Cheat Shop já estiver aberta, a cópia mostrada na lista também é

@@ -252,9 +252,10 @@ bool InstallHooks() {
         MH_CreateHook(g_generate_rarity_target,
                       reinterpret_cast<LPVOID>(&HookGenerateRarity),
                       reinterpret_cast<LPVOID*>(&g_original_generate_rarity)) != MH_OK ||
-        MH_EnableHook(g_apply_rewards_target) != MH_OK ||
-        MH_EnableHook(g_accumulate_item_points_target) != MH_OK ||
-        MH_EnableHook(g_generate_rarity_target) != MH_OK) {
+        MH_QueueEnableHook(g_apply_rewards_target) != MH_OK ||
+        MH_QueueEnableHook(g_accumulate_item_points_target) != MH_OK ||
+        MH_QueueEnableHook(g_generate_rarity_target) != MH_OK ||
+        MH_ApplyQueued() != MH_OK) {
         MH_DisableHook(g_apply_rewards_target);
         MH_DisableHook(g_accumulate_item_points_target);
         MH_DisableHook(g_generate_rarity_target);

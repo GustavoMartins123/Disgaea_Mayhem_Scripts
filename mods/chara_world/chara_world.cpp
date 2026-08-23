@@ -330,9 +330,10 @@ bool InstallHooks() {
         MH_CreateHook(g_param_bonus_hook_target,
                       reinterpret_cast<LPVOID>(&HookParamBonusApply),
                       reinterpret_cast<LPVOID*>(&g_original_param_bonus_apply)) != MH_OK ||
-        MH_EnableHook(g_turn_hook_target) != MH_OK ||
-        MH_EnableHook(g_information_hook_target) != MH_OK ||
-        MH_EnableHook(g_param_bonus_hook_target) != MH_OK) {
+        MH_QueueEnableHook(g_turn_hook_target) != MH_OK ||
+        MH_QueueEnableHook(g_information_hook_target) != MH_OK ||
+        MH_QueueEnableHook(g_param_bonus_hook_target) != MH_OK ||
+        MH_ApplyQueued() != MH_OK) {
         MH_DisableHook(g_turn_hook_target);
         MH_DisableHook(g_information_hook_target);
         MH_DisableHook(g_param_bonus_hook_target);

@@ -9,4 +9,11 @@ System mod de interface do Mod Loader ABI v1.
 
 A DLL contem somente hooks DirectX 12, entrada e UI ImGui. Descoberta, carga, persistencia e ciclo de vida pertencem ao `dxgi.dll`, implementado em `native/mod_loader`.
 
+Enquanto a interface esta aberta, os comandos de teclado, mouse e controle sao
+bloqueados para o jogo. O comando usado para fechar o menu so volta ao jogo
+depois de ser solto.
+
+Sliders alteram o valor em memoria durante o arraste e gravam `config.json` ao
+serem soltos ou quando o menu e fechado.
+
 `INSTALAR_MOD_MENU.exe` ainda nao grava o atlas NMPLTEX/YKCMP. Ele valida os arquivos e falha explicitamente sem alterar o atlas.

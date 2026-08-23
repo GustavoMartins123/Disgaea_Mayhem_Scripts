@@ -1,68 +1,53 @@
-# Disgaea Mayhem - Planejamento de mods
+# Planejamento dos mods
 
-Documentação de planejamento para desenvolvimento de mods customizados no *Disgaea Mayhem*.
+Este arquivo separa o que já está implementado do que ainda depende de pesquisa
+no executável. Um item só deve aparecer no Mod Menu depois que seu fluxo estiver
+confirmado e isolado dos outros sistemas do jogo.
 
----
+## Implementado
 
-## 🛠️ Mod Base / Core Framework: In-Game Mod Menu (Em Desenvolvimento)
-* **Objetivo:** Adicionar uma opção nativa **`Mods`** dentro do **Main Menu** (logo abaixo de `System`), funcionando como um Mod Loader / Gerenciador de Mods in-game (estilo UE4SS / ImGui / ScriptLoader), permitindo ativar, configurar e alternar sub-mods em tempo real sem sair do jogo.
+- Mod Loader: descoberta por `mod.json`, ABI v1, configuração persistente e
+  ciclo de vida centralizado.
+- Mod Menu: overlay DirectX 12, controle por teclado e controle, captura dos
+  comandos do jogo e ajuste dos painéis ao espaço disponível.
+- Chara World: energia configurável e multiplicador dos atributos ganhos nos
+  tiles.
+- Item World: multiplicadores separados de progresso de nível e Item Points,
+  além de raridade mínima para os equipamentos obtidos.
+- Cheat Shop: cinco valores mantidos em `5000%` na memória enquanto o mod está
+  ativo, com restauração ao desativar e durante a gravação do save.
+- Dark Assembly: aprovação garantida na memória da votação atual.
+- DLC Unlocker: resgate reutilizável das definições `1` a `5` injetadas pelo
+  SmokeAPI.
+- Backup Seguro: backup inicial e novos arquivos quando `save.002` muda.
 
----
+O atalho visual `Mods` dentro do Main Menu ainda não foi implementado. O
+instalador existente apenas valida o atlas NMPLTEX/YKCMP e encerra com erro sem
+alterar o arquivo.
 
-## Item World
+## Item World pendente
 
-### 1. Multiplicador de nível do item
+### Chance e quantidade de equipamentos
 
-Implementado. O jogo usa pontos ganhos por derrotas, e não uma quantidade fixa
-de níveis por andar. O mod multiplica esses pontos antes da aplicação do nível.
+É necessário localizar o cálculo específico das recompensas do Item World e
+separá-lo do controle `Item Drops` da Cheat Shop. O multiplicador de Item Points
+e a raridade mínima já estão isolados e não devem ser usados para quantidade.
 
-### 2. Multiplicador de Item Points
+### Salas misteriosas
 
-Implementado separadamente do nível do item.
+Os dados de sala e de ondas foram encontrados, mas a rotina que escolhe entre
+sala comum e sala misteriosa ainda não foi confirmada.
 
-### 3. Chance de drop
+### Innocents
 
-Pendente. O cálculo específico do Item World ainda precisa ser separado da taxa
-geral de drops do jogo.
+A classe e os bancos foram identificados. Ainda falta confirmar onde o jogo
+registra encontro, derrota, ganho e subjugação.
 
-### 4. Salas misteriosas
+## Outros mods pendentes
 
-Pendente. Os dados de sala e de ondas foram encontrados, mas a escolha da sala
-ainda não foi confirmada.
+- Evilities e habilidades sem restrições de classe.
+- Alcance e formato de magias e ataques em área.
+- Velocidade de movimento na base.
+- Paletas de cores e aparências alternativas.
 
-### 5. Innocents
-
-Pendente. A classe e os bancos de dados foram encontrados. Ainda falta confirmar
-o ponto que registra derrota, ganho e subjugação.
-
----
-
-## ⚖️ Mods de Balanceamento e Personagens
-
-### 6. Evilities e Habilidades Sem Restrições
-* **Descrição:** Remover restrições de classe e permitir equipar qualquer Evility ou habilidade única de chefes/personagens lendários em qualquer unidade do seu time.
-* **Impacto:** Criação de builds extremamente criativas e customizadas.
-
-### 7. Alcance e Formato de Magias / Ataques em Área (AoE)
-* **Descrição:** Expandir o alcance e o formato das áreas de efeito de magias e skills especiais de armas para cobrir mapas inteiros.
-* **Impacto:** Limpeza de telas inteiras em batalhas de farming.
-
-### 8. Cheat Shop Ilimitado & Overhaul de Dificuldade
-* **Descrição:** Expandir o limite do NPC de Trapaças (*Cheat Shop*) para permitir valores de até **+5.000%** de EXP, Mana, HL e Drop Rate, além de opções avançadas de estrelas para balanceamento de inimigos.
-* **Impacto:** Controle total da curva de evolução pelo menu nativo do jogo.
-
----
-
-## ⚡ Mods de Qualidade de Vida (QoL)
-
-### 9. Dark Assembly com 100% de Aprovação
-* **Descrição:** Todas as propostas e desejos na Assembleia Sombria passam com aprovação automática de 100% dos senadores, sem necessidade de suborno com itens ou lutas.
-* **Impacto:** Agilidade total para aprovar leis e desbloquear novos recursos.
-
-### 10. Velocidade de Movimento 2x / 3x na Base
-* **Descrição:** Aumentar a velocidade base de corrida do líder dentro do castelo/vila para travessia instantânea entre instalações.
-* **Impacto:** Redução do tempo de deslocamento na base.
-
-### 11. Desbloqueio Total de Paletas de Cores & Skins
-* **Descrição:** Liberar todas as variações de cores e aparências alternativas de heróis e classes recrutáveis desde o início do jogo.
-* **Impacto:** Customização visual completa dos seus personagens.
+Esses itens ainda não possuem pontos de alteração validados.

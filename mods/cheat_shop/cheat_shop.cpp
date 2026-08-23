@@ -480,9 +480,10 @@ bool InstallHooks() {
         MH_CreateHook(g_list_item_target,
                       reinterpret_cast<LPVOID>(&HookBuildListItem),
                       reinterpret_cast<LPVOID*>(&g_original_build_list_item)) != MH_OK ||
-        MH_EnableHook(g_populate_target) != MH_OK ||
-        MH_EnableHook(g_serialize_target) != MH_OK ||
-        MH_EnableHook(g_list_item_target) != MH_OK) {
+        MH_QueueEnableHook(g_populate_target) != MH_OK ||
+        MH_QueueEnableHook(g_serialize_target) != MH_OK ||
+        MH_QueueEnableHook(g_list_item_target) != MH_OK ||
+        MH_ApplyQueued() != MH_OK) {
         MH_DisableHook(g_populate_target);
         MH_DisableHook(g_serialize_target);
         MH_DisableHook(g_list_item_target);

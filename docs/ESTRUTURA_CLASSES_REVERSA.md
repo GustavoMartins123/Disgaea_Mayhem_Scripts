@@ -7,7 +7,7 @@
 1. [MOTOR_NGF_ARQUITETURA.md](MOTOR_NGF_ARQUITETURA.md): engine Ngf, DirectX 12,
    ponteiros intrusivos, `CTask` e `CState`.
 2. [SUBSISTEMA_ITEM_WORLD.md](SUBSISTEMA_ITEM_WORLD.md): ciclo de vida,
-   progressão de nível por derrotas, Item Points e offsets confirmados.
+   progressão de nível por derrotas, Item Points, raridade e offsets confirmados.
 3. [SUBSISTEMA_CHARA_WORLD.md](SUBSISTEMA_CHARA_WORLD.md): energia, lógica/UI e
    pontos de hook do Chara World.
 4. [SUBSISTEMA_CHEAT_SHOP.md](SUBSISTEMA_CHEAT_SHOP.md): controles, limites e
@@ -50,6 +50,7 @@
 - `CItemWorldData + 0x68`: pontos de progressão de nível acumulados por derrotas.
 - `CItemWorldData + 0x88`: acumulador separado de Item Points.
 - `CItemWorldData + 0x74`: contador ponderado com peso 2; não representa nível por andar.
+- RVA `0x001D58A0`: geração de raridade; a chamada de recompensas do Item World ocorre em RVA `0x003C64CE`.
 
 Consulte o documento do subsistema antes de criar hooks: a antiga associação de
 `+0x268` a nível, `+0x328` a bônus de nível e `+0x74` a níveis por andar estava

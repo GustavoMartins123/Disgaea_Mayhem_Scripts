@@ -13,6 +13,9 @@ Enquanto o menu está aberto, teclado, mouse e controle ficam bloqueados para o
 jogo. Os comandos voltam ao jogo depois que a tecla ou o botão usado para fechar
 o menu é solto. A janela e os painéis se ajustam ao espaço disponível na tela.
 
+Durante o arraste de um slider, o efeito acompanha o valor em memória. A
+configuração é gravada quando o controle é solto ou quando o menu é fechado.
+
 O quinto item visual do Main Menu depende de um patch separado no atlas NMPLTEX/YKCMP. O instalador C++ atual apenas valida o pacote e retorna erro explicito porque a escrita do atlas ainda nao esta implementada. Os atalhos sao a entrada canonica do overlay.
 
 O Mod Menu consulta o catalogo, solicita enable/disable, envia opcoes tipadas e pede a execucao de actions. Ele nao descobre pastas, interpreta manifestos, carrega DLLs, grava `config.json`/`enabled.txt` ou escolhe executaveis.

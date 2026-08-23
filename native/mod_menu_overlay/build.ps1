@@ -8,13 +8,21 @@ $buildRoot = Join-Path $menuProject 'build'
 $menuObjectRoot = Join-Path $buildRoot 'obj-menu'
 $loaderObjectRoot = Join-Path $buildRoot 'obj-loader'
 $pluginObjectRoot = Join-Path $buildRoot 'obj-plugins'
-$gcc = 'C:\TDM-GCC-64\bin\gcc.exe'
-$gxx = 'C:\TDM-GCC-64\bin\g++.exe'
-
-foreach ($compiler in @($gcc, $gxx)) {
-    if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
-        throw "Compilador MinGW obrigatorio ausente: $compiler"
+$gxxCommand = Get-Command g++.exe -ErrorAction SilentlyContinue
+if ($null -ne $gxxCommand) {
+    $gxx = $gxxCommand.Source
+} else {
+    $gxxCandidates = @(Get-PSDrive -PSProvider FileSystem | ForEach-Object {
+        Join-Path $_.Root 'TDM-GCC-64\bin\g++.exe'
+    } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    if ($gxxCandidates.Count -ne 1) {
+        throw 'g++.exe nao foi encontrado no PATH nem em uma unica instalacao TDM-GCC-64 dos drives montados.'
     }
+    $gxx = $gxxCandidates[0]
+}
+$gcc = Join-Path (Split-Path -Parent $gxx) 'gcc.exe'
+if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
+    throw "gcc.exe obrigatorio ausente ao lado de g++.exe: $gcc"
 }
 
 New-Item -ItemType Directory -Force $menuObjectRoot, $loaderObjectRoot, $pluginObjectRoot | Out-Null
@@ -113,6 +121,11 @@ $modMenuInstallerOutput = Join-Path $buildRoot 'INSTALAR_MOD_MENU.exe'
     (Join-Path $gameRoot 'mods\mod_menu\INSTALAR_MOD_MENU.cpp') -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular INSTALAR_MOD_MENU.exe' }
 
+$suiteInstallerOutput = Join-Path $buildRoot 'INSTALAR_MOD.exe'
+& $gxx @cppFlags -municode -static -o $suiteInstallerOutput `
+    (Join-Path $gameRoot 'INSTALAR_MOD.cpp') -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular INSTALAR_MOD.exe' }
+
 $cheatShopObject = Compile-CppObject `
     (Join-Path $gameRoot 'mods\cheat_shop\cheat_shop.cpp') $pluginObjectRoot
 $cheatShopOutput = Join-Path $buildRoot 'cheat_shop.dll'
@@ -142,6 +155,8 @@ $deployments = @(
     @($charaWorldOutput, (Join-Path $target 'mods\chara_world\chara_world.dll')),
     @($safeBackupOutput, (Join-Path $target 'mods\safe_backup\safe_backup.dll')),
     @($modMenuInstallerOutput, (Join-Path $target 'mods\mod_menu\INSTALAR_MOD_MENU.exe')),
+    @($suiteInstallerOutput, (Join-Path $target 'INSTALAR_MOD.exe')),
+    @($validatorOutput, (Join-Path $target 'tools\mod_loader_validate.exe')),
     @($cheatShopOutput, (Join-Path $target 'mods\cheat_shop\cheat_shop.dll')),
     @($darkAssemblyOutput, (Join-Path $target 'mods\dark_assembly\dark_assembly.dll')),
     @($dlcUnlockerOutput, (Join-Path $target 'mods\dlc_unlocker\dlc_unlocker.dll'))
@@ -177,7 +192,235 @@ if ($smokeLog -notmatch 'bootstrap concluido com 1 manifesto') {
 }
 Write-Host '[OK] Smoke test isolado do proxy/loader concluido.'
 
-Write-Host '[OK] Loader, Mod Menu e plugins ABI v1 compilados com sucesso.'
+$releaseRoot = Join-Path $buildRoot 'nexus-package'
+$installerTestRoot = Join-Path $buildRoot 'installer-test'
+$installerRollbackRoot = Join-Path $buildRoot 'installer-rollback-test'
+New-Item -ItemType Directory -Force `
+    $releaseRoot, $installerTestRoot, $installerRollbackRoot | Out-Null
+
+function Copy-ReleaseFile {
+    param([string]$Source, [string]$RelativePath)
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        throw "Arquivo do pacote ausente: $Source"
+    }
+    $destination = Join-Path $releaseRoot $RelativePath
+    New-Item -ItemType Directory -Force (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $Source -Destination $destination -Force
+}
+
+$releaseFiles = @(
+    @($loaderOutput, 'dxgi.dll'),
+    @($suiteInstallerOutput, 'INSTALAR_MOD.exe'),
+    @($validatorOutput, 'tools\mod_loader_validate.exe'),
+    @((Join-Path $gameRoot 'tools\INSTRUCOES_RESGATES.txt'), 'tools\INSTRUCOES_RESGATES.txt'),
+    @((Join-Path $gameRoot 'README_NEXUS.txt'), 'README.txt'),
+    @((Join-Path $gameRoot 'SmokeAPI.config.json'), 'SmokeAPI.config.json'),
+    @((Join-Path $gameRoot 'SmokeAPI\smoke_api64.dll'), 'SmokeAPI\smoke_api64.dll'),
+    @((Join-Path $gameRoot 'SmokeAPI\README.txt'), 'SmokeAPI\README.txt'),
+
+    @($menuOutput, 'mods\mod_menu\mod_menu.dll'),
+    @((Join-Path $gameRoot 'mods\mod_menu\mod.json'), 'mods\mod_menu\mod.json'),
+    @((Join-Path $gameRoot 'mods\mod_menu\config.json'), 'mods\mod_menu\config.json'),
+    @((Join-Path $gameRoot 'mods\mod_menu\enabled.txt'), 'mods\mod_menu\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\mod_menu\README.md'), 'mods\mod_menu\README.md'),
+    @((Join-Path $gameRoot 'mods\mod_menu\main_menu\mods_slot.dds'), 'mods\mod_menu\main_menu\mods_slot.dds'),
+    @((Join-Path $gameRoot 'mods\mod_menu\main_menu\OFL.txt'), 'mods\mod_menu\main_menu\OFL.txt'),
+
+    @($charaWorldOutput, 'mods\chara_world\chara_world.dll'),
+    @((Join-Path $gameRoot 'mods\chara_world\mod.json'), 'mods\chara_world\mod.json'),
+    @((Join-Path $gameRoot 'mods\chara_world\config.json'), 'mods\chara_world\config.json'),
+    @((Join-Path $gameRoot 'mods\chara_world\enabled.txt'), 'mods\chara_world\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\chara_world\README.md'), 'mods\chara_world\README.md'),
+
+    @($itemWorldOutput, 'mods\item_world\item_world.dll'),
+    @((Join-Path $gameRoot 'mods\item_world\mod.json'), 'mods\item_world\mod.json'),
+    @((Join-Path $gameRoot 'mods\item_world\config.json'), 'mods\item_world\config.json'),
+    @((Join-Path $gameRoot 'mods\item_world\enabled.txt'), 'mods\item_world\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\item_world\README.md'), 'mods\item_world\README.md'),
+
+    @($cheatShopOutput, 'mods\cheat_shop\cheat_shop.dll'),
+    @((Join-Path $gameRoot 'mods\cheat_shop\mod.json'), 'mods\cheat_shop\mod.json'),
+    @((Join-Path $gameRoot 'mods\cheat_shop\config.json'), 'mods\cheat_shop\config.json'),
+    @((Join-Path $gameRoot 'mods\cheat_shop\enabled.txt'), 'mods\cheat_shop\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\cheat_shop\README.md'), 'mods\cheat_shop\README.md'),
+
+    @($darkAssemblyOutput, 'mods\dark_assembly\dark_assembly.dll'),
+    @((Join-Path $gameRoot 'mods\dark_assembly\mod.json'), 'mods\dark_assembly\mod.json'),
+    @((Join-Path $gameRoot 'mods\dark_assembly\config.json'), 'mods\dark_assembly\config.json'),
+    @((Join-Path $gameRoot 'mods\dark_assembly\enabled.txt'), 'mods\dark_assembly\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\dark_assembly\README.md'), 'mods\dark_assembly\README.md'),
+
+    @($dlcUnlockerOutput, 'mods\dlc_unlocker\dlc_unlocker.dll'),
+    @((Join-Path $gameRoot 'mods\dlc_unlocker\mod.json'), 'mods\dlc_unlocker\mod.json'),
+    @((Join-Path $gameRoot 'mods\dlc_unlocker\config.json'), 'mods\dlc_unlocker\config.json'),
+    @((Join-Path $gameRoot 'mods\dlc_unlocker\enabled.txt'), 'mods\dlc_unlocker\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\dlc_unlocker\README.md'), 'mods\dlc_unlocker\README.md'),
+
+    @($safeBackupOutput, 'mods\safe_backup\safe_backup.dll'),
+    @((Join-Path $gameRoot 'mods\safe_backup\mod.json'), 'mods\safe_backup\mod.json'),
+    @((Join-Path $gameRoot 'mods\safe_backup\config.json'), 'mods\safe_backup\config.json'),
+    @((Join-Path $gameRoot 'mods\safe_backup\enabled.txt'), 'mods\safe_backup\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\safe_backup\README.md'), 'mods\safe_backup\README.md')
+)
+foreach ($releaseFile in $releaseFiles) {
+    Copy-ReleaseFile -Source $releaseFile[0] -RelativePath $releaseFile[1]
+}
+
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$disabledMods = @('chara_world', 'item_world', 'cheat_shop', 'dark_assembly', 'dlc_unlocker', 'safe_backup')
+foreach ($modId in $disabledMods) {
+    [System.IO.File]::WriteAllText(
+        (Join-Path $releaseRoot "mods\$modId\enabled.txt"), '0', $utf8NoBom)
+}
+[System.IO.File]::WriteAllText(
+    (Join-Path $releaseRoot 'mods\mod_menu\enabled.txt'), '1', $utf8NoBom)
+[System.IO.File]::WriteAllText(
+    (Join-Path $releaseRoot 'mods\chara_world\config.json'),
+    @'
+{
+  "schema_version": 1,
+  "mod_id": "chara_world",
+  "options": {
+    "locked_energy": 100,
+    "freeze_energy": true,
+    "tile_status_multiplier": 1.0
+  }
+}
+'@, $utf8NoBom)
+[System.IO.File]::WriteAllText(
+    (Join-Path $releaseRoot 'mods\item_world\config.json'),
+    @'
+{
+  "schema_version": 1,
+  "mod_id": "item_world",
+  "options": {
+    "level_exp_enabled": false,
+    "level_exp_multiplier": 1.0,
+    "item_points_enabled": false,
+    "item_point_multiplier": 1.0,
+    "rarity_enabled": false,
+    "minimum_rarity": 50
+  }
+}
+'@, $utf8NoBom)
+
+& $validatorOutput $releaseRoot
+if ($LASTEXITCODE -ne 0) { throw "Pacote Nexus invalido (codigo $LASTEXITCODE)" }
+$releaseLog = Join-Path $releaseRoot 'mods\mod_loader.log'
+if (Test-Path -LiteralPath $releaseLog) { Remove-Item -LiteralPath $releaseLog -Force }
+
+New-Item -ItemType File -Force (Join-Path $installerTestRoot 'Disgaea_Mayhem.exe') | Out-Null
+Copy-Item -LiteralPath (Join-Path $gameRoot 'NmplDLL.dll') `
+    -Destination (Join-Path $installerTestRoot 'NmplDLL.dll') -Force
+Copy-Item -LiteralPath (Join-Path $gameRoot 'steam_api64_o.dll') `
+    -Destination (Join-Path $installerTestRoot 'steam_api64.dll') -Force
+New-Item -ItemType Directory -Force `
+    (Join-Path $installerTestRoot 'mods\native'), `
+    (Join-Path $installerTestRoot 'mods\main_menu') | Out-Null
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerTestRoot 'mods\registry.json'), '{}', $utf8NoBom)
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerTestRoot 'mods\native\DisgaeaMayhemModMenu.dll'), 'obsolete', $utf8NoBom)
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerTestRoot 'mods\main_menu\OFL.txt'), 'obsolete', $utf8NoBom)
+
+& (Join-Path $releaseRoot 'INSTALAR_MOD.exe') $installerTestRoot
+if ($LASTEXITCODE -ne 0) { throw "Teste isolado do instalador falhou (codigo $LASTEXITCODE)" }
+foreach ($obsolete in @(
+    'mods\registry.json',
+    'mods\native\DisgaeaMayhemModMenu.dll',
+    'mods\main_menu\OFL.txt'
+)) {
+    if (Test-Path -LiteralPath (Join-Path $installerTestRoot $obsolete)) {
+        throw "Instalador preservou artefato obsoleto: $obsolete"
+    }
+}
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerTestRoot 'mods\item_world\enabled.txt'), '1', $utf8NoBom)
+$testConfigPath = Join-Path $installerTestRoot 'mods\item_world\config.json'
+$testConfig = Get-Content -LiteralPath $testConfigPath -Raw | ConvertFrom-Json
+$testConfig.options.minimum_rarity = 77
+[System.IO.File]::WriteAllText(
+    $testConfigPath, ($testConfig | ConvertTo-Json -Depth 8), $utf8NoBom)
+& (Join-Path $releaseRoot 'INSTALAR_MOD.exe') $installerTestRoot
+if ($LASTEXITCODE -ne 0) { throw "Teste de atualizacao do instalador falhou (codigo $LASTEXITCODE)" }
+if ((Get-Content -LiteralPath (Join-Path $installerTestRoot 'mods\item_world\enabled.txt') -Raw).Trim() -ne '1') {
+    throw 'Instalador nao preservou enabled.txt durante a atualizacao.'
+}
+$preservedConfig = Get-Content -LiteralPath $testConfigPath -Raw | ConvertFrom-Json
+if ($preservedConfig.options.minimum_rarity -ne 77) {
+    throw 'Instalador nao preservou config.json durante a atualizacao.'
+}
+Write-Host '[OK] Instalacao limpa e atualizacao com configuracao preservada validadas.'
+
+New-Item -ItemType File -Force `
+    (Join-Path $installerRollbackRoot 'Disgaea_Mayhem.exe') | Out-Null
+Copy-Item -LiteralPath (Join-Path $gameRoot 'NmplDLL.dll') `
+    -Destination (Join-Path $installerRollbackRoot 'NmplDLL.dll') -Force
+Copy-Item -LiteralPath (Join-Path $gameRoot 'steam_api64_o.dll') `
+    -Destination (Join-Path $installerRollbackRoot 'steam_api64.dll') -Force
+New-Item -ItemType Directory -Force `
+    (Join-Path $installerRollbackRoot 'mods\item_world'), `
+    (Join-Path $installerRollbackRoot 'mods\native') | Out-Null
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerRollbackRoot 'dxgi.dll'), 'loader-anterior', $utf8NoBom)
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerRollbackRoot 'mods\item_world\config.json'),
+    '{"schema_version":0}', $utf8NoBom)
+[System.IO.File]::WriteAllText(
+    (Join-Path $installerRollbackRoot 'mods\native\DisgaeaMayhemModMenu.dll'),
+    'overlay-anterior', $utf8NoBom)
+& (Join-Path $releaseRoot 'INSTALAR_MOD.exe') $installerRollbackRoot
+if ($LASTEXITCODE -eq 0) {
+    throw 'Teste de rollback deveria falhar por config.json invalido.'
+}
+if ((Get-Content -LiteralPath (Join-Path $installerRollbackRoot 'dxgi.dll') -Raw) -ne 'loader-anterior') {
+    throw 'Rollback nao restaurou o loader anterior.'
+}
+if (-not (Test-Path -LiteralPath `
+        (Join-Path $installerRollbackRoot 'mods\native\DisgaeaMayhemModMenu.dll'))) {
+    throw 'Rollback nao restaurou o artefato removido.'
+}
+if (Test-Path -LiteralPath (Join-Path $installerRollbackRoot 'steam_api64_o.dll')) {
+    throw 'Rollback preservou uma copia steam_api64_o.dll que nao existia antes.'
+}
+$originalSteamHash = (Get-FileHash -Algorithm SHA256 `
+    -LiteralPath (Join-Path $gameRoot 'steam_api64_o.dll')).Hash
+$rollbackSteamHash = (Get-FileHash -Algorithm SHA256 `
+    -LiteralPath (Join-Path $installerRollbackRoot 'steam_api64.dll')).Hash
+if ($originalSteamHash -ne $rollbackSteamHash) {
+    throw 'Rollback nao restaurou steam_api64.dll.'
+}
+$rollbackTransactions = @(Get-ChildItem -LiteralPath $installerRollbackRoot -Force | `
+    Where-Object { $_.Name -like '.dm_mod_install_transaction_*' })
+if ($rollbackTransactions.Count -ne 0) {
+    throw 'Rollback deixou uma transacao temporaria.'
+}
+Write-Host '[OK] Falha forcada restaurou integralmente o estado anterior.'
+
+$packageCandidate = Join-Path $buildRoot 'Disgaea_Mayhem_Mod_Loader_Nexus.new.zip'
+$packageOutput = Join-Path $gameRoot 'Disgaea_Mayhem_Mod_Loader_Nexus.zip'
+Compress-Archive -Path ((Get-ChildItem -LiteralPath $releaseRoot).FullName) `
+    -DestinationPath $packageCandidate -CompressionLevel Optimal -Force
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::OpenRead($packageCandidate)
+try {
+    $actualEntries = @($archive.Entries | Where-Object { $_.Name } | ForEach-Object {
+        $_.FullName.Replace('/', '\')
+    } | Sort-Object)
+} finally {
+    $archive.Dispose()
+}
+$expectedEntries = @($releaseFiles | ForEach-Object { $_[1] } | Sort-Object)
+$entryDifference = @(Compare-Object $expectedEntries $actualEntries)
+if ($entryDifference.Count -ne 0) {
+    $entryDifference | Out-String | Write-Host
+    throw 'Conteudo do ZIP diverge da lista canonica.'
+}
+Copy-Item -LiteralPath $packageCandidate -Destination $packageOutput -Force
+Write-Host "[OK] Pacote Nexus validado e atualizado: $packageOutput"
+
+Write-Host '[OK] Loader, Mod Menu, plugins ABI v1, instalador e pacote compilados com sucesso.'
 
 $resolvedBuildRoot = [System.IO.Path]::GetFullPath($buildRoot)
 $expectedBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $menuProject 'build'))

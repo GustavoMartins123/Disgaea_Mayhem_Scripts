@@ -15,6 +15,16 @@ O loader descobre manifestos, valida caminhos/ABI/configuracoes, carrega cada pl
 
 Consulte [docs/MOD_LOADER_ARQUITETURA.md](docs/MOD_LOADER_ARQUITETURA.md) para o diagnostico e o fluxo completo.
 
+## Instalacao
+
+Extraia o pacote e, com o jogo fechado, execute `INSTALAR_MOD.exe`. O instalador
+localiza o jogo ou aceita a pasta como argumento, valida o pacote, instala o
+loader e os sete mods, configura o SmokeAPI e executa o validador ABI v1.
+
+A instalacao e transacional. Em uma atualizacao, `config.json` e `enabled.txt`
+existentes sao preservados. Se uma copia ou a validacao final falhar, os arquivos
+anteriores sao restaurados. Instalacoes novas iniciam apenas o Mod Menu ativo.
+
 ## Build
 
 Com o jogo fechado:
@@ -24,20 +34,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File native/mod_menu_overlay/buil
 ```
 
 O script compila e implanta loader, Mod Menu e plugins ABI v1. O validador nativo executado ao final verifica todos os manifestos, arquivos declarados e exports.
+Ele tambem compila e testa o instalador em uma pasta isolada e, somente depois,
+gera `Disgaea_Mayhem_Mod_Loader_Nexus.zip` com uma lista fechada de arquivos.
 
 ## Uso
 
 Inicie o jogo normalmente. Abra o Mod Menu por `F1`, `Insert`, `Home`, `L3 + R3` ou `Back`.
+
+Falhas de manifesto, configuração, versão do jogo ou inicialização aparecem no
+estado do mod e são registradas em `mods/mod_loader.log`.
 
 O rotulo integrado ao Main Menu ainda depende de um gravador NMPLTEX/YKCMP. O instalador atual valida os arquivos e falha explicitamente sem alterar o atlas.
 
 ## Mods atuais
 
 - `chara_world`: energia configurável e multiplicador dos atributos ganhos nos tiles.
-- `safe_backup`: toggle residente com worker controlada pelo ciclo de vida.
-- `item_world`: multiplicadores separados de nível e Item Points.
-- `cheat_shop`: mantém os cinco valores principais em `5000%` enquanto estiver ativo.
+- `safe_backup`: cria um backup inicial e novos backups quando `save.002` muda.
+- `item_world`: controles separados para progresso de nível, Item Points e raridade mínima dos equipamentos obtidos.
+- `cheat_shop`: mantém EXP, Mana, HL, Weapon Mastery e Item Drops em `5000%` enquanto estiver ativo. O valor de Item Drops pode aumentar muito a quantidade de recompensas.
 - `dark_assembly`: aprovação garantida em memória, sem substituir `wish.dat`.
-- `dlc_unlocker`: action nativa com executável explícito.
+- `dlc_unlocker`: toggle residente que confirma em memória o consumo dos cinco itens simulados pelo SmokeAPI.
 
 Os detalhes de engenharia reversa ficam em `docs/`. Os arquivos `.lub` de `data/script` pertencem a engine do jogo; nao sao fontes Lua de mods.

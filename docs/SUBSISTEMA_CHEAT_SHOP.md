@@ -40,6 +40,10 @@ O mod é um plugin ativável. Depois que a Cheat Shop e o save são carregados, 
 confirma os IDs dos cinco controles e mantém o valor atual e o limite superior
 em `5000`.
 
+O controle `Item Drops` não representa raridade. Ele atua no fluxo geral de
+recompensas e pode aumentar bastante a quantidade de itens recebidos. A raridade
+mínima do Item World usa uma rotina separada no plugin `item_world`.
+
 Ao desativar, os valores anteriores são restaurados. Durante uma gravação, o
 plugin entrega os valores anteriores ao jogo e reaplica `5000` somente depois.
 O banco `cheatSetting.dat` e o save permanecem sem a alteração do mod.

@@ -2,11 +2,11 @@
   "schema_version": 1,
   "id": "safe_backup",
   "name": "Guardião de Backup Seguro",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Antigravity",
   "category": "QoL & Protecao",
   "type": "toggle",
   "load_order": 120,
-  "description": "Gera backups automaticos rotativos e versionados dos saves a cada 5 minutos e apos cada salvamento, prevenindo qualquer perda de progresso por congelamento ou crash do jogo.",
+  "description": "Cria um backup inicial e novos backups com data e hora quando o arquivo save.002 muda.",
   "plugin": "safe_backup.dll"
 }

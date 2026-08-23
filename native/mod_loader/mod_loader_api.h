@@ -81,6 +81,7 @@ struct DmModLoaderApi {
     BOOL(WINAPI* GetModById)(const char* mod_id, DmModView* out_mod);
     BOOL(WINAPI* SetModEnabled)(const char* mod_id, BOOL enabled);
     BOOL(WINAPI* SetModOption)(const char* mod_id, const char* option_id, const DmModValue* value);
+    BOOL(WINAPI* FlushModConfig)(const char* mod_id);
     BOOL(WINAPI* ExecuteModAction)(const char* mod_id);
     void(WINAPI* Log)(const char* component, const char* message);
 };

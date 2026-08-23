@@ -38,6 +38,8 @@ struct ModRecord {
     std::string action_success_status;
     bool auto_apply = false;
     int load_order = 100;
+    DmModValue persisted_values[DM_MAX_MOD_OPTIONS] = {};
+    bool config_dirty = false;
     HMODULE module = nullptr;
     DmModEnableFn enable = nullptr;
     DmModDisableFn disable = nullptr;
@@ -793,6 +795,9 @@ bool ParseManifest(const std::wstring& directory_path, const std::wstring& direc
         return false;
     }
     if (record.view.type != DmModType::Action && !ParseConfig(record, error)) return false;
+    for (std::uint32_t index = 0; index < record.view.option_count; ++index) {
+        record.persisted_values[index] = record.view.options[index].value;
+    }
     std::snprintf(record.view.status, sizeof(record.view.status), "Descoberto; aguardando inicializacao.");
     return true;
 }
@@ -815,6 +820,7 @@ BOOL WINAPI ApiGetMod(std::uint32_t index, DmModView* out_mod);
 BOOL WINAPI ApiGetModById(const char* mod_id, DmModView* out_mod);
 BOOL WINAPI ApiSetModEnabled(const char* mod_id, BOOL enabled);
 BOOL WINAPI ApiSetModOption(const char* mod_id, const char* option_id, const DmModValue* value);
+BOOL WINAPI ApiFlushModConfig(const char* mod_id);
 BOOL WINAPI ApiExecuteModAction(const char* mod_id);
 void WINAPI ApiLog(const char* component, const char* message);
 
@@ -826,6 +832,7 @@ const DmModLoaderApi g_api = {
     &ApiGetModById,
     &ApiSetModEnabled,
     &ApiSetModOption,
+    &ApiFlushModConfig,
     &ApiExecuteModAction,
     &ApiLog,
 };
@@ -964,6 +971,45 @@ bool StartAction(ModRecord& record) {
     return true;
 }
 
+struct LifecycleGuard {
+    LifecycleGuard() { AcquireSRWLockExclusive(&g_lifecycle_lock); }
+    ~LifecycleGuard() { ReleaseSRWLockExclusive(&g_lifecycle_lock); }
+};
+
+// Requer g_lifecycle_lock.
+bool FlushRecordConfig(ModRecord& record) {
+    if (!record.config_dirty) return true;
+    if (PersistConfig(record)) {
+        AcquireSRWLockExclusive(&g_records_lock);
+        for (std::uint32_t index = 0; index < record.view.option_count; ++index) {
+            record.persisted_values[index] = record.view.options[index].value;
+        }
+        record.config_dirty = false;
+        ReleaseSRWLockExclusive(&g_records_lock);
+        return true;
+    }
+
+    bool rollback_ok = true;
+    for (std::uint32_t index = 0; index < record.view.option_count; ++index) {
+        if (record.module != nullptr &&
+            (record.set_option == nullptr ||
+             record.set_option(record.view.options[index].id, &record.persisted_values[index]) == FALSE)) {
+            rollback_ok = false;
+        }
+        AcquireSRWLockExclusive(&g_records_lock);
+        record.view.options[index].value = record.persisted_values[index];
+        ReleaseSRWLockExclusive(&g_records_lock);
+    }
+    AcquireSRWLockExclusive(&g_records_lock);
+    record.config_dirty = false;
+    ReleaseSRWLockExclusive(&g_records_lock);
+    if (!rollback_ok && record.view.runtime_enabled != FALSE) DisablePlugin(record);
+    SetRecordStatus(record, DmModState::Failed,
+                    rollback_ok ? "Falha ao persistir config.json; valores revertidos."
+                                : "Falha ao persistir config.json e ao reverter plugin; mod desativado.");
+    return false;
+}
+
 std::uint32_t WINAPI ApiGetModCount() {
     AcquireSRWLockShared(&g_records_lock);
     const std::uint32_t count = static_cast<std::uint32_t>(g_records.size());
@@ -997,12 +1043,10 @@ BOOL WINAPI ApiGetModById(const char* mod_id, DmModView* out_mod) {
 }
 
 BOOL WINAPI ApiSetModEnabled(const char* mod_id, BOOL enabled) {
-    AcquireSRWLockExclusive(&g_lifecycle_lock);
-    struct LifecycleUnlock {
-        ~LifecycleUnlock() { ReleaseSRWLockExclusive(&g_lifecycle_lock); }
-    } unlock;
+    LifecycleGuard guard;
     ModRecord* record = FindRecord(mod_id);
     if (record == nullptr || record->view.type != DmModType::Toggle || record->view.required != FALSE) return FALSE;
+    FlushRecordConfig(*record);
     const bool requested = enabled != FALSE;
     const bool previous = record->view.runtime_enabled != FALSE;
     if (requested == previous) {
@@ -1032,10 +1076,7 @@ BOOL WINAPI ApiSetModEnabled(const char* mod_id, BOOL enabled) {
 }
 
 BOOL WINAPI ApiSetModOption(const char* mod_id, const char* option_id, const DmModValue* value) {
-    AcquireSRWLockExclusive(&g_lifecycle_lock);
-    struct LifecycleUnlock {
-        ~LifecycleUnlock() { ReleaseSRWLockExclusive(&g_lifecycle_lock); }
-    } unlock;
+    LifecycleGuard guard;
     if (option_id == nullptr || value == nullptr || value->struct_size != sizeof(DmModValue)) return FALSE;
     ModRecord* record = FindRecord(mod_id);
     if (record == nullptr || record->view.type != DmModType::Toggle) return FALSE;
@@ -1054,35 +1095,33 @@ BOOL WINAPI ApiSetModOption(const char* mod_id, const char* option_id, const DmM
         (!std::isfinite(value->float_value) || value->float_value < selected->min_float ||
          value->float_value > selected->max_float)) return FALSE;
 
-    const DmModValue previous = selected->value;
-    const bool plugin_received_value = record->module != nullptr;
-    if (plugin_received_value && (record->set_option == nullptr || record->set_option(option_id, value) == FALSE)) {
+    if (record->module != nullptr &&
+        (record->set_option == nullptr || record->set_option(option_id, value) == FALSE)) {
         SetRecordStatus(*record, DmModState::Failed, "Plugin rejeitou a opcao '%s'.", option_id);
         return FALSE;
     }
     AcquireSRWLockExclusive(&g_records_lock);
     selected->value = *value;
+    record->config_dirty = true;
     ReleaseSRWLockExclusive(&g_records_lock);
-    if (!PersistConfig(*record)) {
-        bool rollback_ok = true;
-        if (plugin_received_value) rollback_ok = record->set_option(option_id, &previous) != FALSE;
-        AcquireSRWLockExclusive(&g_records_lock);
-        selected->value = previous;
-        ReleaseSRWLockExclusive(&g_records_lock);
-        if (!rollback_ok && record->view.runtime_enabled != FALSE) DisablePlugin(*record);
-        SetRecordStatus(*record, DmModState::Failed,
-                        rollback_ok ? "Falha ao persistir config.json; valor revertido."
-                                    : "Falha ao persistir config.json e ao reverter plugin; mod desativado.");
-        return FALSE;
-    }
     return TRUE;
 }
 
+BOOL WINAPI ApiFlushModConfig(const char* mod_id) {
+    LifecycleGuard guard;
+    if (mod_id == nullptr || mod_id[0] == '\0') {
+        bool all_ok = true;
+        for (ModRecord& record : g_records) {
+            if (!FlushRecordConfig(record)) all_ok = false;
+        }
+        return all_ok ? TRUE : FALSE;
+    }
+    ModRecord* record = FindRecord(mod_id);
+    return record != nullptr && FlushRecordConfig(*record) ? TRUE : FALSE;
+}
+
 BOOL WINAPI ApiExecuteModAction(const char* mod_id) {
-    AcquireSRWLockExclusive(&g_lifecycle_lock);
-    struct LifecycleUnlock {
-        ~LifecycleUnlock() { ReleaseSRWLockExclusive(&g_lifecycle_lock); }
-    } unlock;
+    LifecycleGuard guard;
     ModRecord* record = FindRecord(mod_id);
     return record != nullptr && StartAction(*record) ? TRUE : FALSE;
 }
