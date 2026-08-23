@@ -1,28 +1,20 @@
 # Chara World - Energia Infinita
 
-Plugin nativo ABI v1 que mantem a energia do Chara World no valor configurado.
+Este mod mantém a energia do Chara World no valor configurado.
 
-## Ciclo de vida
+Ele aplica o valor ao preparar os dados da sessão e novamente quando uma ação do
+tabuleiro altera a energia. Assim, o valor também é corrigido ao entrar com uma
+sessão que já estava abaixo de `100`.
 
-- `Mod_Initialize`: valida ABI, fingerprint PE e prólogo, então instala o hook
-  síncrono da resolução de turno no RVA `0x00461CA0`.
-- `Mod_SetOption`: recebe `locked_energy` e `freeze_energy` tipados.
-- `Mod_Enable`: habilita o efeito já instalado.
-- `Mod_Disable`: interrompe as escritas imediatamente.
-- `Mod_Shutdown`: desabilita e remove o hook depois de aguardar chamadas ativas.
-- `DllMain`: passivo.
+Opções:
 
-O plugin resolve `CCharacterWorldInformation` somente a partir do objeto da
-rotina nativa que está em execução. Ele valida as VTables e escreve apenas na
-energia atual em `+0x178`, antes e depois da resolução do turno. Não existe
-worker, polling ou ponteiro de instância em cache.
+- `locked_energy`: valor entre `10` e `100`;
+- `freeze_energy`: ativa ou desativa a trava.
 
-O limite configurável máximo é `100`, porque esse é o limite superior retornado
-pela própria classe nativa. `+0x174` pertence ao ponteiro da VTable do subobjeto
-de energia e nunca pode receber valores do mod.
+O plugin é carregado pelo Mod Loader quando `enabled.txt` contém `1`. As opções
+ficam em `config.json` e também podem ser alteradas pelo Mod Menu.
 
-O plugin e carregado automaticamente pelo `dxgi.dll` quando `enabled.txt` contem `1`. Nao ha injecao manual nem segundo gerenciador de estado.
+O campo usado pelo mod é somente o valor atual da energia. O campo que causava o
+crash na versão anterior não é mais alterado.
 
-Os tipos e limites das opcoes ficam em `mod.json`; `locked_energy` e `freeze_energy` sao lidos e persistidos exclusivamente em `config.json`.
-
-Consulte `docs/SUBSISTEMA_CHARA_WORLD.md` e `docs/MOD_LOADER_ARQUITETURA.md`.
+Consulte `docs/SUBSISTEMA_CHARA_WORLD.md` para os dados confirmados do jogo.

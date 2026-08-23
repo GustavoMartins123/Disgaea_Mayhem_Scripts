@@ -92,9 +92,9 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 ## Estado atual dos mods
 
 - `mod_menu`: system mod ABI v1; nao gerencia DLLs.
-- `chara_world`: usa a resolução de turno validada no RVA `0x00461CA0`; escreve somente na energia atual em `+0x178`, de forma síncrona, sem worker ou instância em cache.
+- `chara_world`: corrige a energia ao preparar a sessão e ao resolver ações do tabuleiro; escreve somente no valor atual em `+0x178`.
 - `safe_backup`: uma unica worker, evento de parada e backups dentro da pasta do mod.
-- `item_world`: plugin MinHook no RVA `0x001D77E0`; valida fingerprint/prologo, multiplica `CItemWorldData+0x68` e preserva o restante do fluxo nativo. Nao usa polling.
+- `item_world`: multiplica separadamente os pontos de nível e os Item Points. Os demais resultados continuam sob controle do jogo.
 - `cheat_shop`: action nativa estrita que valida o schema e expande atomicamente os cinco limites de porcentagem para 5000.
 - `dark_assembly` e `dlc_unlocker`: actions nativas com executavel declarado.
 

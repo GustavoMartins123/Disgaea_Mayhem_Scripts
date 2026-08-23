@@ -9,11 +9,9 @@ O Mod Menu e a interface do Mod Loader, nao o loader. Ele e carregado como syste
 3. Abra o overlay com `F1`, `Insert` ou `Home`. No controle, use `L3 + R3` ou `Back`.
 4. Feche com `Esc` ou `B`.
 
-Enquanto o overlay está aberto, o host captura as mensagens Win32 e neutraliza
-as consultas de teclado, mouse e controle da camada `Nmpl::Input`. O jogo só
-volta a receber comandos depois que a tecla ou botão usado para fechar o menu é
-solto. O layout usa escala derivada do back-buffer e alterna entre painéis lado a
-lado e empilhados conforme o espaço disponível.
+Enquanto o menu está aberto, teclado, mouse e controle ficam bloqueados para o
+jogo. Os comandos voltam ao jogo depois que a tecla ou o botão usado para fechar
+o menu é solto. A janela e os painéis se ajustam ao espaço disponível na tela.
 
 O quinto item visual do Main Menu depende de um patch separado no atlas NMPLTEX/YKCMP. O instalador C++ atual apenas valida o pacote e retorna erro explicito porque a escrita do atlas ainda nao esta implementada. Os atalhos sao a entrada canonica do overlay.
 

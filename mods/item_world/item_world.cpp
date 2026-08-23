@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -15,6 +16,7 @@
 namespace {
 
 constexpr std::uintptr_t kApplyRewardsRva = 0x001D77E0;
+constexpr std::uintptr_t kAccumulateItemPointsRva = 0x001D7BD0;
 constexpr std::uintptr_t kItemWorldVtableRva = 0x00A251F0;
 constexpr std::size_t kLevelProgressOffset = 0x68;
 constexpr DWORD kExpectedTimestamp = 0x6A6AB373;
@@ -22,16 +24,28 @@ constexpr DWORD kExpectedSizeOfImage = 0x00E01000;
 constexpr LONG kMultiplierScale = 1000;
 
 using ApplyRewardsFn = void (*)(void* item_world, void* result_context);
+using AccumulateItemPointsFn = void (*)(void* item_world, std::int64_t base_points);
 
 std::uintptr_t g_exe_base = 0;
-void* g_hook_target = nullptr;
+void* g_apply_rewards_target = nullptr;
+void* g_accumulate_item_points_target = nullptr;
 ApplyRewardsFn g_original_apply_rewards = nullptr;
+AccumulateItemPointsFn g_original_accumulate_item_points = nullptr;
 bool g_minhook_initialized = false;
 volatile LONG g_enabled = FALSE;
-volatile LONG g_multiplier_scaled = 5000;
+volatile LONG g_level_multiplier_scaled = 5000;
+volatile LONG g_item_point_multiplier_scaled = 5000;
 volatile LONG g_invalid_object_logged = FALSE;
+std::atomic<LONG> g_active_calls{0};
+std::atomic<bool> g_shutting_down{false};
 SRWLOCK g_reward_lock = SRWLOCK_INIT;
 void(WINAPI* g_log)(const char*, const char*) = nullptr;
+
+class HookScope {
+public:
+    HookScope() { g_active_calls.fetch_add(1, std::memory_order_acq_rel); }
+    ~HookScope() { g_active_calls.fetch_sub(1, std::memory_order_acq_rel); }
+};
 
 bool IsReadableRange(std::uintptr_t address, std::size_t size) {
     if (address < 0x10000 || size == 0 || address > std::numeric_limits<std::uintptr_t>::max() - size) {
@@ -80,7 +94,29 @@ void LogInvalidObjectOnce() {
     }
 }
 
+bool IsExpectedItemWorldObject(void* item_world) {
+    const auto object = reinterpret_cast<std::uintptr_t>(item_world);
+    return IsReadableRange(object, sizeof(std::uintptr_t)) &&
+           *reinterpret_cast<const std::uintptr_t*>(object) ==
+               g_exe_base + kItemWorldVtableRva;
+}
+
+std::int64_t ScalePositiveValue(std::int64_t value, LONG multiplier) {
+    if (value <= 0 || multiplier <= kMultiplierScale) return value;
+
+    const std::int64_t quotient = value / kMultiplierScale;
+    const std::int64_t remainder = value % kMultiplierScale;
+    const std::int64_t extra =
+        (remainder * static_cast<std::int64_t>(multiplier) + (kMultiplierScale / 2)) /
+        kMultiplierScale;
+    if (quotient > (std::numeric_limits<std::int64_t>::max() - extra) / multiplier) {
+        return std::numeric_limits<std::int64_t>::max();
+    }
+    return quotient * multiplier + extra;
+}
+
 void HookApplyRewards(void* item_world, void* result_context) {
+    HookScope scope;
     if (g_original_apply_rewards == nullptr) return;
     if (InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE) {
         g_original_apply_rewards(item_world, result_context);
@@ -89,9 +125,12 @@ void HookApplyRewards(void* item_world, void* result_context) {
 
     const auto object = reinterpret_cast<std::uintptr_t>(item_world);
     const auto progress_address = object + kLevelProgressOffset;
-    if (!IsReadableRange(object, sizeof(std::uintptr_t)) ||
-        !IsWritableRange(progress_address, sizeof(std::int32_t)) ||
-        *reinterpret_cast<const std::uintptr_t*>(object) != g_exe_base + kItemWorldVtableRva) {
+    if (g_shutting_down.load(std::memory_order_acquire)) {
+        g_original_apply_rewards(item_world, result_context);
+        return;
+    }
+    if (!IsExpectedItemWorldObject(item_world) ||
+        !IsWritableRange(progress_address, sizeof(std::int32_t))) {
         LogInvalidObjectOnce();
         g_original_apply_rewards(item_world, result_context);
         return;
@@ -100,7 +139,7 @@ void HookApplyRewards(void* item_world, void* result_context) {
     AcquireSRWLockExclusive(&g_reward_lock);
     auto* progress = reinterpret_cast<std::int32_t*>(progress_address);
     const std::int32_t original_points = *progress;
-    const LONG multiplier = InterlockedCompareExchange(&g_multiplier_scaled, 0, 0);
+    const LONG multiplier = InterlockedCompareExchange(&g_level_multiplier_scaled, 0, 0);
 
     if (original_points >= 0 && multiplier >= kMultiplierScale) {
         std::int64_t scaled = static_cast<std::int64_t>(original_points) * multiplier;
@@ -117,48 +156,94 @@ void HookApplyRewards(void* item_world, void* result_context) {
     ReleaseSRWLockExclusive(&g_reward_lock);
 }
 
-bool InstallHook() {
-    static const std::uint8_t expected_prologue[] = {
+void HookAccumulateItemPoints(void* item_world, std::int64_t base_points) {
+    HookScope scope;
+    if (g_original_accumulate_item_points == nullptr) return;
+    if (InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE ||
+        g_shutting_down.load(std::memory_order_acquire)) {
+        g_original_accumulate_item_points(item_world, base_points);
+        return;
+    }
+
+    if (!IsExpectedItemWorldObject(item_world)) {
+        LogInvalidObjectOnce();
+        g_original_accumulate_item_points(item_world, base_points);
+        return;
+    }
+
+    const LONG multiplier =
+        InterlockedCompareExchange(&g_item_point_multiplier_scaled, 0, 0);
+    g_original_accumulate_item_points(item_world,
+                                     ScalePositiveValue(base_points, multiplier));
+}
+
+bool InstallHooks() {
+    static const std::uint8_t expected_apply_prologue[] = {
         0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x56, 0x57,
         0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x30
     };
+    static const std::uint8_t expected_item_points_prologue[] = {
+        0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74,
+        0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x41
+    };
 
-    g_hook_target = reinterpret_cast<void*>(g_exe_base + kApplyRewardsRva);
-    if (!IsReadableRange(reinterpret_cast<std::uintptr_t>(g_hook_target), sizeof(expected_prologue)) ||
-        std::memcmp(g_hook_target, expected_prologue, sizeof(expected_prologue)) != 0) {
-        g_hook_target = nullptr;
+    g_apply_rewards_target = reinterpret_cast<void*>(g_exe_base + kApplyRewardsRva);
+    g_accumulate_item_points_target =
+        reinterpret_cast<void*>(g_exe_base + kAccumulateItemPointsRva);
+    if (!IsReadableRange(reinterpret_cast<std::uintptr_t>(g_apply_rewards_target),
+                         sizeof(expected_apply_prologue)) ||
+        std::memcmp(g_apply_rewards_target, expected_apply_prologue,
+                    sizeof(expected_apply_prologue)) != 0 ||
+        !IsReadableRange(reinterpret_cast<std::uintptr_t>(g_accumulate_item_points_target),
+                         sizeof(expected_item_points_prologue)) ||
+        std::memcmp(g_accumulate_item_points_target, expected_item_points_prologue,
+                    sizeof(expected_item_points_prologue)) != 0) {
+        g_apply_rewards_target = nullptr;
+        g_accumulate_item_points_target = nullptr;
         return false;
     }
 
     if (MH_Initialize() != MH_OK) return false;
     g_minhook_initialized = true;
-    if (MH_CreateHook(g_hook_target, reinterpret_cast<LPVOID>(&HookApplyRewards),
-                      reinterpret_cast<LPVOID*>(&g_original_apply_rewards)) != MH_OK) {
-        MH_Uninitialize();
-        g_minhook_initialized = false;
-        g_hook_target = nullptr;
-        return false;
-    }
-    if (MH_EnableHook(g_hook_target) != MH_OK) {
-        MH_RemoveHook(g_hook_target);
+    if (MH_CreateHook(g_apply_rewards_target, reinterpret_cast<LPVOID>(&HookApplyRewards),
+                      reinterpret_cast<LPVOID*>(&g_original_apply_rewards)) != MH_OK ||
+        MH_CreateHook(g_accumulate_item_points_target,
+                      reinterpret_cast<LPVOID>(&HookAccumulateItemPoints),
+                      reinterpret_cast<LPVOID*>(&g_original_accumulate_item_points)) != MH_OK ||
+        MH_EnableHook(g_apply_rewards_target) != MH_OK ||
+        MH_EnableHook(g_accumulate_item_points_target) != MH_OK) {
+        MH_DisableHook(g_apply_rewards_target);
+        MH_DisableHook(g_accumulate_item_points_target);
+        MH_RemoveHook(g_apply_rewards_target);
+        MH_RemoveHook(g_accumulate_item_points_target);
         MH_Uninitialize();
         g_original_apply_rewards = nullptr;
+        g_original_accumulate_item_points = nullptr;
         g_minhook_initialized = false;
-        g_hook_target = nullptr;
+        g_apply_rewards_target = nullptr;
+        g_accumulate_item_points_target = nullptr;
         return false;
     }
     return true;
 }
 
-void RemoveHook() {
+void RemoveHooks() {
     if (!g_minhook_initialized) return;
-    if (g_hook_target != nullptr) {
-        MH_DisableHook(g_hook_target);
-        MH_RemoveHook(g_hook_target);
+    g_shutting_down.store(true, std::memory_order_release);
+    if (g_apply_rewards_target != nullptr) MH_DisableHook(g_apply_rewards_target);
+    if (g_accumulate_item_points_target != nullptr) {
+        MH_DisableHook(g_accumulate_item_points_target);
+    }
+    while (g_active_calls.load(std::memory_order_acquire) != 0) Sleep(0);
+    if (g_apply_rewards_target != nullptr) MH_RemoveHook(g_apply_rewards_target);
+    if (g_accumulate_item_points_target != nullptr) {
+        MH_RemoveHook(g_accumulate_item_points_target);
     }
     MH_Uninitialize();
     g_original_apply_rewards = nullptr;
-    g_hook_target = nullptr;
+    g_original_accumulate_item_points = nullptr;
+    g_apply_rewards_target = nullptr;
+    g_accumulate_item_points_target = nullptr;
     g_minhook_initialized = false;
 }
 
@@ -182,7 +267,8 @@ __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context
         return FALSE;
     }
     g_exe_base = reinterpret_cast<std::uintptr_t>(executable);
-    if (!InstallHook()) {
+    g_shutting_down.store(false, std::memory_order_release);
+    if (!InstallHooks()) {
         if (g_log != nullptr) g_log("item_world", "Falha ao validar ou instalar o hook de recompensas.");
         g_exe_base = 0;
         return FALSE;
@@ -202,18 +288,25 @@ __declspec(dllexport) BOOL WINAPI Mod_Disable() {
 
 __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValue* value) {
     if (key == nullptr || value == nullptr || value->struct_size != sizeof(DmModValue)) return FALSE;
-    if (std::strcmp(key, "level_exp_multiplier") != 0 || value->type != DmOptionType::SliderFloat ||
-        !std::isfinite(value->float_value) || value->float_value < 1.0F || value->float_value > 20.0F) {
+    if (value->type != DmOptionType::SliderFloat || !std::isfinite(value->float_value) ||
+        value->float_value < 1.0F || value->float_value > 20.0F) {
         return FALSE;
     }
     const LONG scaled = static_cast<LONG>(std::lround(value->float_value * kMultiplierScale));
-    InterlockedExchange(&g_multiplier_scaled, scaled);
-    return TRUE;
+    if (std::strcmp(key, "level_exp_multiplier") == 0) {
+        InterlockedExchange(&g_level_multiplier_scaled, scaled);
+        return TRUE;
+    }
+    if (std::strcmp(key, "item_point_multiplier") == 0) {
+        InterlockedExchange(&g_item_point_multiplier_scaled, scaled);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 __declspec(dllexport) void WINAPI Mod_Shutdown() {
     InterlockedExchange(&g_enabled, FALSE);
-    RemoveHook();
+    RemoveHooks();
     g_exe_base = 0;
     g_log = nullptr;
 }

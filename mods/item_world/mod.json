@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "item_world",
-  "name": "Item World - Multiplicador de EXP de Nível",
+  "name": "Item World - Multiplicadores",
   "category": "Item World",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Multiplica os pontos nativos obtidos ao derrotar inimigos no Item World, preservando os limites, recompensas de chefes e recálculo do jogo.",
+  "description": "Configura separadamente a progressão de nível e os Item Points obtidos no Item World.",
   "type": "toggle",
   "load_order": 110,
   "plugin": "item_world.dll",
@@ -16,6 +16,13 @@
     {
       "id": "level_exp_multiplier",
       "name": "Multiplicador de EXP de Nível",
+      "type": "slider_float",
+      "min": 1.0,
+      "max": 20.0
+    },
+    {
+      "id": "item_point_multiplier",
+      "name": "Multiplicador de Item Points",
       "type": "slider_float",
       "min": 1.0,
       "max": 20.0

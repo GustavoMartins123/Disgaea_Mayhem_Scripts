@@ -14,6 +14,7 @@
 namespace {
 
 constexpr std::uintptr_t kTurnResolveRva = 0x00461CA0;
+constexpr std::uintptr_t kInformationSyncRva = 0x00453050;
 constexpr std::uintptr_t kCharacterWorldInformationVtableRva = 0x00A57610;
 constexpr std::uintptr_t kEnergyValueVtableRva = 0x00A1A7B0;
 constexpr std::size_t kInformationPointerOffset = 0x200;
@@ -23,6 +24,7 @@ constexpr DWORD kExpectedTimestamp = 0x6A6AB373;
 constexpr DWORD kExpectedImageSize = 0x00E01000;
 
 using TurnResolveFn = bool (*)(void* task);
+using InformationSyncFn = void (*)(void* information);
 
 std::atomic<bool> g_enabled{false};
 std::atomic<bool> g_freeze_energy{true};
@@ -31,8 +33,10 @@ std::atomic<LONG> g_active_calls{0};
 std::atomic<bool> g_shutting_down{false};
 
 std::uintptr_t g_exe_base = 0;
-void* g_hook_target = nullptr;
+void* g_turn_hook_target = nullptr;
+void* g_information_hook_target = nullptr;
 TurnResolveFn g_original_turn_resolve = nullptr;
+InformationSyncFn g_original_information_sync = nullptr;
 bool g_minhook_initialized = false;
 const DmModLoaderApi* g_loader = nullptr;
 
@@ -92,12 +96,7 @@ bool ValidateExecutableBuild() {
            nt->OptionalHeader.SizeOfImage == kExpectedImageSize;
 }
 
-std::int32_t* ResolveCurrentEnergy(void* task) {
-    if (!IsAccessibleRange(task, kInformationPointerOffset + sizeof(void*), false)) return nullptr;
-
-    const auto task_address = reinterpret_cast<std::uintptr_t>(task);
-    const auto information = *reinterpret_cast<std::uintptr_t*>(
-        task_address + kInformationPointerOffset);
+std::int32_t* ResolveCurrentEnergyFromInformation(std::uintptr_t information) {
     if (!IsAccessibleRange(reinterpret_cast<void*>(information),
                            kCurrentEnergyOffset + sizeof(std::int32_t), true)) {
         return nullptr;
@@ -113,13 +112,20 @@ std::int32_t* ResolveCurrentEnergy(void* task) {
     return reinterpret_cast<std::int32_t*>(information + kCurrentEnergyOffset);
 }
 
-void ApplyConfiguredEnergy(void* task) {
+std::int32_t* ResolveCurrentEnergyFromTask(void* task) {
+    if (!IsAccessibleRange(task, kInformationPointerOffset + sizeof(void*), false)) return nullptr;
+    const auto task_address = reinterpret_cast<std::uintptr_t>(task);
+    const auto information = *reinterpret_cast<std::uintptr_t*>(
+        task_address + kInformationPointerOffset);
+    return ResolveCurrentEnergyFromInformation(information);
+}
+
+void ApplyConfiguredEnergy(std::int32_t* energy) {
     if (!g_enabled.load(std::memory_order_acquire) ||
         !g_freeze_energy.load(std::memory_order_acquire)) {
         return;
     }
 
-    std::int32_t* energy = ResolveCurrentEnergy(task);
     if (energy != nullptr) {
         *energy = g_target_energy.load(std::memory_order_relaxed);
     }
@@ -127,44 +133,76 @@ void ApplyConfiguredEnergy(void* task) {
 
 bool HookTurnResolve(void* task) {
     HookScope scope;
-    ApplyConfiguredEnergy(task);
+    ApplyConfiguredEnergy(ResolveCurrentEnergyFromTask(task));
     const bool result = g_original_turn_resolve(task);
     if (!g_shutting_down.load(std::memory_order_acquire)) {
-        ApplyConfiguredEnergy(task);
+        ApplyConfiguredEnergy(ResolveCurrentEnergyFromTask(task));
     }
     return result;
 }
 
-bool InstallHook() {
-    static const std::uint8_t expected_prologue[] = {
+void HookInformationSync(void* information) {
+    HookScope scope;
+    ApplyConfiguredEnergy(ResolveCurrentEnergyFromInformation(
+        reinterpret_cast<std::uintptr_t>(information)));
+    g_original_information_sync(information);
+    if (!g_shutting_down.load(std::memory_order_acquire)) {
+        ApplyConfiguredEnergy(ResolveCurrentEnergyFromInformation(
+            reinterpret_cast<std::uintptr_t>(information)));
+    }
+}
+
+bool InstallHooks() {
+    static const std::uint8_t expected_turn_prologue[] = {
         0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48,
         0x89, 0x70, 0x18, 0x55, 0x57, 0x41, 0x54, 0x41
     };
+    static const std::uint8_t expected_information_prologue[] = {
+        0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83,
+        0xEC, 0x50, 0x48, 0x8B, 0x81, 0x90, 0x02, 0x00
+    };
 
-    g_hook_target = reinterpret_cast<void*>(g_exe_base + kTurnResolveRva);
-    if (!IsAccessibleRange(g_hook_target, sizeof(expected_prologue), false) ||
-        std::memcmp(g_hook_target, expected_prologue, sizeof(expected_prologue)) != 0) {
-        Log("Build rejeitada: prologo da rotina de resolucao de turno nao corresponde.");
-        g_hook_target = nullptr;
+    g_turn_hook_target = reinterpret_cast<void*>(g_exe_base + kTurnResolveRva);
+    g_information_hook_target = reinterpret_cast<void*>(g_exe_base + kInformationSyncRva);
+    if (!IsAccessibleRange(g_turn_hook_target, sizeof(expected_turn_prologue), false) ||
+        std::memcmp(g_turn_hook_target, expected_turn_prologue,
+                    sizeof(expected_turn_prologue)) != 0 ||
+        !IsAccessibleRange(g_information_hook_target,
+                           sizeof(expected_information_prologue), false) ||
+        std::memcmp(g_information_hook_target, expected_information_prologue,
+                    sizeof(expected_information_prologue)) != 0) {
+        Log("Build rejeitada: rotinas de energia nao correspondem.");
+        g_turn_hook_target = nullptr;
+        g_information_hook_target = nullptr;
         return false;
     }
 
     if (MH_Initialize() != MH_OK) {
         Log("Falha ao inicializar MinHook.");
-        g_hook_target = nullptr;
+        g_turn_hook_target = nullptr;
+        g_information_hook_target = nullptr;
         return false;
     }
     g_minhook_initialized = true;
 
-    if (MH_CreateHook(g_hook_target, reinterpret_cast<LPVOID>(&HookTurnResolve),
+    if (MH_CreateHook(g_turn_hook_target, reinterpret_cast<LPVOID>(&HookTurnResolve),
                       reinterpret_cast<LPVOID*>(&g_original_turn_resolve)) != MH_OK ||
-        MH_EnableHook(g_hook_target) != MH_OK) {
-        MH_RemoveHook(g_hook_target);
+        MH_CreateHook(g_information_hook_target,
+                      reinterpret_cast<LPVOID>(&HookInformationSync),
+                      reinterpret_cast<LPVOID*>(&g_original_information_sync)) != MH_OK ||
+        MH_EnableHook(g_turn_hook_target) != MH_OK ||
+        MH_EnableHook(g_information_hook_target) != MH_OK) {
+        MH_DisableHook(g_turn_hook_target);
+        MH_DisableHook(g_information_hook_target);
+        MH_RemoveHook(g_turn_hook_target);
+        MH_RemoveHook(g_information_hook_target);
         MH_Uninitialize();
         g_minhook_initialized = false;
-        g_hook_target = nullptr;
+        g_turn_hook_target = nullptr;
+        g_information_hook_target = nullptr;
         g_original_turn_resolve = nullptr;
-        Log("Falha ao instalar o hook de resolucao de turno.");
+        g_original_information_sync = nullptr;
+        Log("Falha ao instalar os hooks de energia.");
         return false;
     }
 
@@ -175,18 +213,22 @@ void RemoveHook() {
     g_enabled.store(false, std::memory_order_release);
     g_shutting_down.store(true, std::memory_order_release);
 
-    if (g_minhook_initialized && g_hook_target != nullptr) {
-        MH_DisableHook(g_hook_target);
+    if (g_minhook_initialized) {
+        if (g_turn_hook_target != nullptr) MH_DisableHook(g_turn_hook_target);
+        if (g_information_hook_target != nullptr) MH_DisableHook(g_information_hook_target);
         while (g_active_calls.load(std::memory_order_acquire) != 0) {
             Sleep(0);
         }
-        MH_RemoveHook(g_hook_target);
+        if (g_turn_hook_target != nullptr) MH_RemoveHook(g_turn_hook_target);
+        if (g_information_hook_target != nullptr) MH_RemoveHook(g_information_hook_target);
     }
     if (g_minhook_initialized) MH_Uninitialize();
 
     g_minhook_initialized = false;
-    g_hook_target = nullptr;
+    g_turn_hook_target = nullptr;
+    g_information_hook_target = nullptr;
     g_original_turn_resolve = nullptr;
+    g_original_information_sync = nullptr;
 }
 
 }  // namespace
@@ -211,11 +253,14 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostConte
     }
 
     g_shutting_down.store(false, std::memory_order_release);
-    return InstallHook() ? TRUE : FALSE;
+    return InstallHooks() ? TRUE : FALSE;
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
-    if (!g_minhook_initialized || g_hook_target == nullptr) return FALSE;
+    if (!g_minhook_initialized || g_turn_hook_target == nullptr ||
+        g_information_hook_target == nullptr) {
+        return FALSE;
+    }
     g_enabled.store(true, std::memory_order_release);
     return TRUE;
 }

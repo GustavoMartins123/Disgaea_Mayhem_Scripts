@@ -1,30 +1,18 @@
-# Item World - Multiplicador de EXP de Nível
+# Item World - Multiplicadores
 
-Plugin residente ABI v1 que altera somente a progressão nativa de nível dos
-itens. O jogo acumula pontos por inimigo em `CItemWorldData + 0x68` e converte
-esses pontos em `CItemStatus.lv_` na aplicação das recompensas.
+Este mod altera dois ganhos do Item World:
 
-## Ciclo de vida
+- `level_exp_multiplier`: pontos usados para aumentar o nível do item;
+- `item_point_multiplier`: Item Points recebidos por derrotas e conclusão de ondas.
 
-- `Mod_Initialize` valida o fingerprint PE e o prólogo do RVA `0x1D77E0` antes
-  de instalar o MinHook.
-- `Mod_Enable` ativa o multiplicador configurado.
-- `Mod_Disable` volta imediatamente ao cálculo original.
-- `Mod_Shutdown` remove o hook e libera o MinHook.
+O valor `1.0` mantém o cálculo original. Cada opção pode ser configurada entre
+`1.0` e `20.0`.
 
-O hook multiplica temporariamente os pontos entregues à função nativa. Depois da
-aplicação, o valor transitório é restaurado. Os contadores de chefes em
-`+0x70/+0x74/+0x78`, Item Points e o recálculo de atributos permanecem sob
-controle do jogo.
+O jogo continua aplicando seus limites, bônus de chefes e atualização dos
+atributos do item. O mod não altera a chance de drops, a escolha de salas ou os
+Innocents, pois esses caminhos ainda não foram confirmados no executável.
 
-Não há polling, escrita em `+0x74`, subjugação automática de Inocentes nem opção
-de Mystery Rooms. Esses comportamentos antigos não possuíam implementação
-validada e foram removidos.
+O plugin é carregado pelo Mod Loader quando `enabled.txt` contém `1`. As opções
+ficam em `config.json` e também podem ser alteradas pelo Mod Menu.
 
-Compatibilidade confirmada para o executável com SHA-256:
-
-```text
-13988368F66ADE40205C1D0D18157B6AE2D7736D67AC0C8734FE1DD4E62D5B41
-```
-
-Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` para o fluxo desmontado.
+Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` para os dados confirmados do jogo.

@@ -47,7 +47,7 @@ incorreta.
 
 ## Resumo do Chara World
 
-- `CCharacterWorldInformation + 0x174`: energia máxima.
+- `CCharacterWorldInformation + 0x174`: parte de um ponteiro interno; não é energia.
 - `CCharacterWorldInformation + 0x178`: energia atual da lógica.
 - `CUIUnion_CharacterWorld_Energy + 0x70`: energia exibida.
 - `CUIUnion_CharacterWorld_Energy + 0x78`: barra de progresso.

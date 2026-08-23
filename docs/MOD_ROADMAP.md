@@ -1,4 +1,4 @@
-# 📜 Disgaea Mayhem - Roadmap & Ideias de Mods
+# Disgaea Mayhem - Planejamento de mods
 
 Documentação de planejamento para desenvolvimento de mods customizados no *Disgaea Mayhem*.
 
@@ -9,27 +9,31 @@ Documentação de planejamento para desenvolvimento de mods customizados no *Dis
 
 ---
 
-## 🗡️ Mods para o *Item World* (Mundo dos Itens)
+## Item World
 
-### 1. Multiplicador Acelerado de Nível de Item
-* **Descrição:** Fazer com que cada andar concluído suba o item em **+5 ou +10 níveis** (em vez de apenas +1), reduzindo drasticamente o tempo necessário para alcançar o nível 9999/máximo dos equipamentos.
-* **Impacto:** Progressão rápida de armas e armaduras no endgame.
+### 1. Multiplicador de nível do item
 
-### 2. Taxa de Inocentes Subjugados (100% Subdued)
-* **Descrição:** Todos os Inocentes (*Specialists*) encontrados dentro dos itens já começam no estado subjugado (*Subdued*) e com seus valores base duplicados/maximizados.
-* **Impacto:** Elimina a necessidade de caçar e bater nos inocentes manualmente no mapa.
+Implementado. O jogo usa pontos ganhos por derrotas, e não uma quantidade fixa
+de níveis por andar. O mod multiplica esses pontos antes da aplicação do nível.
 
-### 3. Salas Misteriosas (*Mystery Rooms*) Frequentes & Customizadas
-* **Descrição:** Aumentar expressivamente a probabilidade de spawn de Mystery Rooms raras a cada andar (Sala do Duplicador de Itens, Forja de Bônus de Atributos, Estátuas de Buff, Banco de HL e Curandeiro).
-* **Impacto:** Acesso consistente às melhores mecânicas de duplicação e refinamento de itens.
+### 2. Multiplicador de Item Points
 
-### 4. Drops de Raridade Lendária / Épica Garantidos
-* **Descrição:** Forçar baús de tesouro e drops de inimigos no Item World a gerarem itens exclusivamente de raridade Lendária ou Épica, com todos os slots de inocentes já abertos e desbloqueados.
-* **Impacto:** Coleta instantânea de itens de topo de linha sem RNG negativo.
+Implementado separadamente do nível do item.
 
-### 5. Manipulação de Eventos do Item Room
-* **Descrição:** Modificar as tabelas e roletas de recompensas de Culto, Oráculo e Apostas dentro do Item Room para sempre entregarem os melhores resultados e bônus máximos.
-* **Impacto:** Elimina penalidades de eventos de roleta no Item World.
+### 3. Chance de drop
+
+Pendente. O cálculo específico do Item World ainda precisa ser separado da taxa
+geral de drops do jogo.
+
+### 4. Salas misteriosas
+
+Pendente. Os dados de sala e de ondas foram encontrados, mas a escolha da sala
+ainda não foi confirmada.
+
+### 5. Innocents
+
+Pendente. A classe e os bancos de dados foram encontrados. Ainda falta confirmar
+o ponto que registra derrota, ganho e subjugação.
 
 ---
 

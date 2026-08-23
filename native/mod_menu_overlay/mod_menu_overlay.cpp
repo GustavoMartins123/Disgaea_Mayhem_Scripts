@@ -1996,7 +1996,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
     g_hooks_installed.store(true, std::memory_order_release);
     SetStatus(STATUS_HOOKS_INSTALLED);
     if (g_loader_api != nullptr && g_loader_api->Log != nullptr) {
-        g_loader_api->Log("mod_menu", "Hooks DirectX 12 e captura exclusiva de input instalados.");
+        g_loader_api->Log("mod_menu", "Interface DirectX 12 e bloqueio de comandos instalados.");
     }
     return TRUE;
 }
