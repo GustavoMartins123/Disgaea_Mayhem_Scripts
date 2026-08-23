@@ -174,3 +174,12 @@ if ($smokeLog -notmatch 'bootstrap concluido com 1 manifesto') {
 Write-Host '[OK] Smoke test isolado do proxy/loader concluido.'
 
 Write-Host '[OK] Loader, Mod Menu e plugins ABI v1 compilados com sucesso.'
+
+$resolvedBuildRoot = [System.IO.Path]::GetFullPath($buildRoot)
+$expectedBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $menuProject 'build'))
+if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+        $resolvedBuildRoot, $expectedBuildRoot)) {
+    throw "Diretorio de compilacao inesperado: $resolvedBuildRoot"
+}
+Remove-Item -LiteralPath $resolvedBuildRoot -Recurse -Force
+Write-Host '[OK] Arquivos temporarios de compilacao removidos.'
