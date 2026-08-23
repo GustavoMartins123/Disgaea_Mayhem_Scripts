@@ -52,18 +52,28 @@ Nosso ecossistema segue a arquitetura modular e desacoplada inspirada no padrão
 Cada mod deve ser completamente autônomo (*standalone*), independente e auto-contido em sua pasta:
 
 ```text
-mods/<nome_do_mod>/
-├── enabled.txt              # Flag de ativacao rapida (1 = ativado, 0 = desativado)
-├── mod.json                 # Metadados, categoria, tipo (toggle/action), plugin e opcoes
-├── README.md                # Instrucoes e documentacao tecnica especifica do mod
-├── <nome_do_mod>.dll        # Hook/Plugin residente em memoria (se C++)
-├── APLICAR_MOD_<nome>.exe   # Utilitario standalone compilado em C++ (com Auto-Discovery)
-├── APLICAR_MOD_<nome>.bat   # Lancador de 1 clique
-└── Scripts/ (se Lua)        # Scripts modulares Lua
-    ├── config.lua           # Valores padrao de configuracao
-    ├── main.lua             # Bootstrap de inicializacao
-    └── main_impl.lua        # Implementacao e hooks das rotinas do jogo
+mods/<mod_id>/
+├── mod.json        # Manifesto canonico schema_version 1 (imutavel: id, tipo, limites)
+├── config.json     # Valores correntes das options (obrigatorio p/ toggle e system)
+├── enabled.txt     # Estado persistido: exatamente "0" ou "1"
+├── <mod_id>.dll    # Plugin ABI v1 (toggle/system)
+└── README.md       # Documentacao tecnica do mod
 ```
+
+Mods `type: "action"` trocam o `plugin` por um `executable` declarado no manifesto e
+não usam `config.json` nem `enabled.txt`.
+
+**Autoridade única:** `mod.json` e `config.json` pertencem ao loader. Um plugin nunca
+os escreve, nunca se auto-ativa e nunca chama `LoadLibrary` para outro mod.
+
+**Reúso:** helpers de hot path (validação de ponteiro, guarda de chamadas em voo,
+escalonamento) vêm de `native/mod_loader/dm_mod_common.h`, header-only. Estado único do
+processo — configuração, ciclo de vida, identidade da build do jogo — vem do loader via
+`DmModHostContext`/`DmModLoaderApi`.
+
+> Para escrever um mod novo, siga [`docs/GUIA_CRIAR_MOD.md`](docs/GUIA_CRIAR_MOD.md):
+> contrato da ABI, esqueleto pronto, o que o loader faz por você e os erros que o
+> validador rejeita.
 
 ---
 

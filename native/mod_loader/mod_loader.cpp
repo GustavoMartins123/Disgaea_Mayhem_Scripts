@@ -47,6 +47,9 @@ struct ModRecord {
     DmModShutdownFn shutdown = nullptr;
 };
 
+constexpr DWORD kExpectedGameTimestamp = 0x6A6AB373;
+constexpr DWORD kExpectedGameImageSize = 0x00E01000;
+
 SRWLOCK g_records_lock = SRWLOCK_INIT;
 SRWLOCK g_log_lock = SRWLOCK_INIT;
 SRWLOCK g_lifecycle_lock = SRWLOCK_INIT;
@@ -54,6 +57,9 @@ std::vector<ModRecord> g_records;
 std::uint32_t g_discovery_errors = 0;
 std::wstring g_game_directory;
 std::string g_game_directory_utf8;
+std::uintptr_t g_game_module_base = 0;
+std::size_t g_game_module_size = 0;
+bool g_game_build_verified = false;
 FILE* g_log_file = nullptr;
 
 template <std::size_t N>
@@ -882,6 +888,9 @@ bool LoadAndEnablePlugin(ModRecord& record) {
         &g_api,
         g_game_directory_utf8.c_str(),
         record.directory_path_utf8.c_str(),
+        g_game_module_base,
+        g_game_module_size,
+        g_game_build_verified ? TRUE : FALSE,
     };
     if (initialize(&context) == FALSE) {
         shutdown();
@@ -1187,6 +1196,51 @@ bool DiscoverMods() {
     return !g_records.empty();
 }
 
+bool IsCommittedRange(const void* address, std::size_t size) {
+    if (address == nullptr || size == 0) return false;
+    MEMORY_BASIC_INFORMATION information = {};
+    if (VirtualQuery(address, &information, sizeof(information)) != sizeof(information) ||
+        information.State != MEM_COMMIT ||
+        (information.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+        return false;
+    }
+    const auto start = reinterpret_cast<std::uintptr_t>(address);
+    const auto end = reinterpret_cast<std::uintptr_t>(information.BaseAddress) + information.RegionSize;
+    return start <= end && size <= end - start;
+}
+
+void ResolveGameModule() {
+    g_game_module_base = 0;
+    g_game_module_size = 0;
+    g_game_build_verified = false;
+
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    if (base == 0 || !IsCommittedRange(reinterpret_cast<const void*>(base), sizeof(IMAGE_DOS_HEADER))) {
+        LogLine("loader", "modulo do jogo inacessivel; plugins receberao build nao verificada");
+        return;
+    }
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return;
+
+    const auto nt_address = base + static_cast<std::uintptr_t>(dos->e_lfanew);
+    if (!IsCommittedRange(reinterpret_cast<const void*>(nt_address), sizeof(IMAGE_NT_HEADERS64))) return;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(nt_address);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return;
+    }
+
+    g_game_module_base = base;
+    g_game_module_size = nt->OptionalHeader.SizeOfImage;
+    g_game_build_verified = nt->FileHeader.TimeDateStamp == kExpectedGameTimestamp &&
+                            nt->OptionalHeader.SizeOfImage == kExpectedGameImageSize;
+    LogLine("loader", "modulo do jogo em 0x%llX (%lu bytes), build esperada: %s",
+            static_cast<unsigned long long>(g_game_module_base),
+            static_cast<unsigned long>(g_game_module_size),
+            g_game_build_verified ? "sim" : "nao");
+}
+
 bool InitializePathsAndLog(const wchar_t* explicit_game_directory) {
     if (explicit_game_directory != nullptr) {
         const DWORD attributes = GetFileAttributesW(explicit_game_directory);
@@ -1214,6 +1268,7 @@ bool InitializePathsAndLog(const wchar_t* explicit_game_directory) {
 
 DWORD WINAPI DmModLoaderRun(LPVOID) {
     if (!InitializePathsAndLog(nullptr)) return 1;
+    ResolveGameModule();
     if (!DiscoverMods()) {
         LogLine("loader", "nenhum manifesto valido; loader encerrado em modo fail-closed");
         return 2;

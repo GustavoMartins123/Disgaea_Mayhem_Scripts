@@ -9,7 +9,7 @@
 #include <cstring>
 
 #include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
-#include "../../native/mod_loader/mod_loader_api.h"
+#include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
 
@@ -19,86 +19,28 @@ constexpr std::uintptr_t kVoteTaskVtableRva = 0x00A59960;
 constexpr std::size_t kTaskPointerOffset = 0x200;
 constexpr std::size_t kForcePassFlagOffset = 0x298;
 constexpr std::size_t kOutcomeOffset = 0x250;
-constexpr DWORD kExpectedTimestamp = 0x6A6AB373;
-constexpr DWORD kExpectedImageSize = 0x00E01000;
 
 using VoteUpdateFn = bool (*)(void* state, const void* update_info);
 
 std::atomic<bool> g_enabled{false};
 std::atomic<bool> g_shutting_down{false};
 std::atomic<LONG> g_active_calls{0};
-std::uintptr_t g_exe_base = 0;
 void* g_hook_target = nullptr;
 VoteUpdateFn g_original_vote_update = nullptr;
 bool g_minhook_initialized = false;
-const DmModLoaderApi* g_loader = nullptr;
-
-class HookScope {
-public:
-    HookScope() { g_active_calls.fetch_add(1, std::memory_order_acq_rel); }
-    ~HookScope() { g_active_calls.fetch_sub(1, std::memory_order_acq_rel); }
-};
-
-void Log(const char* message) {
-    if (g_loader != nullptr && g_loader->Log != nullptr) {
-        g_loader->Log("dark_assembly", message);
-    }
-}
-
-bool IsAccessibleRange(const void* address, std::size_t size, bool require_write) {
-    if (address == nullptr || size == 0) return false;
-    MEMORY_BASIC_INFORMATION information = {};
-    if (VirtualQuery(address, &information, sizeof(information)) != sizeof(information) ||
-        information.State != MEM_COMMIT ||
-        (information.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
-        return false;
-    }
-
-    const DWORD protection = information.Protect & 0xFF;
-    if (require_write && protection != PAGE_READWRITE && protection != PAGE_WRITECOPY &&
-        protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY) {
-        return false;
-    }
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    const auto end = reinterpret_cast<std::uintptr_t>(information.BaseAddress) +
-                     information.RegionSize;
-    return start <= end && size <= end - start;
-}
-
-bool ValidateExecutableBuild() {
-    if (g_exe_base == 0 ||
-        !IsAccessibleRange(reinterpret_cast<void*>(g_exe_base), sizeof(IMAGE_DOS_HEADER), false)) {
-        return false;
-    }
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(g_exe_base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return false;
-
-    const auto nt_address = g_exe_base + static_cast<std::uintptr_t>(dos->e_lfanew);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(nt_address), sizeof(IMAGE_NT_HEADERS64), false)) {
-        return false;
-    }
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(nt_address);
-    return nt->Signature == IMAGE_NT_SIGNATURE &&
-           nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
-           nt->FileHeader.TimeDateStamp == kExpectedTimestamp &&
-           nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-           nt->OptionalHeader.SizeOfImage == kExpectedImageSize;
-}
+dm::HostLog Log;
 
 bool ResolveVoteObjects(void* state, std::uint8_t*& force_pass_flag) {
-    if (!IsAccessibleRange(state, kForcePassFlagOffset + sizeof(std::uint8_t), true)) {
+    if (!dm::IsWritableRange(state, kForcePassFlagOffset + sizeof(std::uint8_t))) {
         return false;
     }
     const auto state_address = reinterpret_cast<std::uintptr_t>(state);
-    if (*reinterpret_cast<std::uintptr_t*>(state_address) !=
-        g_exe_base + kVoteStateVtableRva) {
-        return false;
-    }
+    if (!dm::HasVtable(state_address, kVoteStateVtableRva)) return false;
 
     const auto task = *reinterpret_cast<std::uintptr_t*>(state_address + kTaskPointerOffset);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(task),
-                           kOutcomeOffset + sizeof(std::uint8_t), true) ||
-        *reinterpret_cast<std::uintptr_t*>(task) != g_exe_base + kVoteTaskVtableRva) {
+    if (!dm::IsWritableRange(reinterpret_cast<void*>(task),
+                             kOutcomeOffset + sizeof(std::uint8_t)) ||
+        !dm::HasVtable(task, kVoteTaskVtableRva)) {
         return false;
     }
     force_pass_flag = reinterpret_cast<std::uint8_t*>(state_address + kForcePassFlagOffset);
@@ -106,7 +48,7 @@ bool ResolveVoteObjects(void* state, std::uint8_t*& force_pass_flag) {
 }
 
 bool HookVoteUpdate(void* state, const void* update_info) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     std::uint8_t* force_pass_flag = nullptr;
     std::uint8_t previous_value = 0;
     const bool force_pass = g_enabled.load(std::memory_order_acquire) &&
@@ -132,9 +74,9 @@ bool InstallHook() {
         0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x18, 0x55,
         0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56
     };
-    g_hook_target = reinterpret_cast<void*>(g_exe_base + kVoteUpdateRva);
-    if (!IsAccessibleRange(g_hook_target, sizeof(expected_prologue), false) ||
-        std::memcmp(g_hook_target, expected_prologue, sizeof(expected_prologue)) != 0) {
+    g_hook_target = reinterpret_cast<void*>(dm::Rva(kVoteUpdateRva));
+    if (!dm::MatchesPrologue(dm::Rva(kVoteUpdateRva), expected_prologue,
+                             sizeof(expected_prologue))) {
         Log("Build rejeitada: rotina de votacao nao corresponde.");
         g_hook_target = nullptr;
         return false;
@@ -166,7 +108,7 @@ void RemoveHook() {
     g_shutting_down.store(true, std::memory_order_release);
     if (g_minhook_initialized && g_hook_target != nullptr) {
         MH_DisableHook(g_hook_target);
-        while (g_active_calls.load(std::memory_order_acquire) != 0) Sleep(0);
+        dm::DrainActiveCalls(g_active_calls);
         MH_RemoveHook(g_hook_target);
     }
     if (g_minhook_initialized) MH_Uninitialize();
@@ -182,18 +124,8 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
-        context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||
-        context->loader->struct_size != sizeof(DmModLoaderApi) ||
-        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION) {
-        return FALSE;
-    }
-    g_loader = context->loader;
-    g_exe_base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    if (!ValidateExecutableBuild()) {
-        Log("Build do jogo rejeitada pelo fingerprint PE x64 esperado.");
-        return FALSE;
-    }
+    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    Log.Bind(context->loader, "dark_assembly");
     g_shutting_down.store(false, std::memory_order_release);
     return InstallHook() ? TRUE : FALSE;
 }
@@ -215,8 +147,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char*, const Dm
 
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     RemoveHook();
-    g_loader = nullptr;
-    g_exe_base = 0;
+    Log.Reset();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {

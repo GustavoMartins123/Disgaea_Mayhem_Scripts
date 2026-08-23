@@ -9,7 +9,7 @@
 #include <cstring>
 
 #include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
-#include "../../native/mod_loader/mod_loader_api.h"
+#include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
 
@@ -37,8 +37,6 @@ constexpr std::size_t kListItemCurrentOffset = 0x18;
 constexpr std::size_t kListItemUpperOffset = 0x20;
 constexpr std::int32_t kActiveValue = 5000;
 constexpr std::int32_t kDatabaseBaseMaximum = 500;
-constexpr DWORD kExpectedTimestamp = 0x6A6AB373;
-constexpr DWORD kExpectedImageSize = 0x00E01000;
 constexpr std::size_t kTargetCount = 5;
 constexpr std::uint32_t kTargetIds[kTargetCount] = {
     10101,
@@ -67,7 +65,6 @@ std::atomic<bool> g_enabled{false};
 std::atomic<bool> g_shutting_down{false};
 std::atomic<LONG> g_active_calls{0};
 std::atomic<bool> g_serializer_error_logged{false};
-std::uintptr_t g_exe_base = 0;
 std::uintptr_t g_information = 0;
 void* g_populate_target = nullptr;
 void* g_serialize_target = nullptr;
@@ -79,75 +76,7 @@ GaugeSnapshot g_snapshots[kTargetCount] = {};
 std::uintptr_t g_list_items[kTargetCount] = {};
 SRWLOCK g_state_lock = SRWLOCK_INIT;
 bool g_minhook_initialized = false;
-const DmModLoaderApi* g_loader = nullptr;
-
-class HookScope {
-public:
-    HookScope() { g_active_calls.fetch_add(1, std::memory_order_acq_rel); }
-    ~HookScope() { g_active_calls.fetch_sub(1, std::memory_order_acq_rel); }
-};
-
-void Log(const char* message) {
-    if (g_loader != nullptr && g_loader->Log != nullptr) {
-        g_loader->Log("cheat_shop", message);
-    }
-}
-
-bool IsAccessibleRange(const void* address, std::size_t size, bool require_write) {
-    if (address == nullptr || size == 0) return false;
-    MEMORY_BASIC_INFORMATION information = {};
-    if (VirtualQuery(address, &information, sizeof(information)) != sizeof(information) ||
-        information.State != MEM_COMMIT ||
-        (information.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
-        return false;
-    }
-
-    const DWORD protection = information.Protect & 0xFF;
-    if (require_write && protection != PAGE_READWRITE && protection != PAGE_WRITECOPY &&
-        protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY) {
-        return false;
-    }
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    const auto end = reinterpret_cast<std::uintptr_t>(information.BaseAddress) +
-                     information.RegionSize;
-    return start <= end && size <= end - start;
-}
-
-bool IsExecutableAddress(const void* address) {
-    if (address == nullptr) return false;
-    MEMORY_BASIC_INFORMATION information = {};
-    if (VirtualQuery(address, &information, sizeof(information)) != sizeof(information) ||
-        information.State != MEM_COMMIT ||
-        (information.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
-        return false;
-    }
-    const DWORD protection = information.Protect & 0xFF;
-    return protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ ||
-           protection == PAGE_EXECUTE_READWRITE ||
-           protection == PAGE_EXECUTE_WRITECOPY;
-}
-
-bool ValidateExecutableBuild() {
-    if (g_exe_base == 0 ||
-        !IsAccessibleRange(reinterpret_cast<void*>(g_exe_base),
-                           sizeof(IMAGE_DOS_HEADER), false)) {
-        return false;
-    }
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(g_exe_base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return false;
-
-    const auto nt_address = g_exe_base + static_cast<std::uintptr_t>(dos->e_lfanew);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(nt_address),
-                           sizeof(IMAGE_NT_HEADERS64), false)) {
-        return false;
-    }
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(nt_address);
-    return nt->Signature == IMAGE_NT_SIGNATURE &&
-           nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
-           nt->FileHeader.TimeDateStamp == kExpectedTimestamp &&
-           nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-           nt->OptionalHeader.SizeOfImage == kExpectedImageSize;
-}
+dm::HostLog Log;
 
 int TargetIndex(std::uint32_t id) {
     for (std::size_t index = 0; index < kTargetCount; ++index) {
@@ -158,12 +87,12 @@ int TargetIndex(std::uint32_t id) {
 
 bool ResolveTargetRecord(std::uintptr_t wrapper, std::uint32_t expected_id,
                          std::uint32_t& resolved_id) {
-    if (!IsAccessibleRange(reinterpret_cast<void*>(wrapper), sizeof(std::uintptr_t), false)) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(wrapper), sizeof(std::uintptr_t))) {
         return false;
     }
     const auto record = *reinterpret_cast<const std::uintptr_t*>(wrapper);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(record),
-                           kRecordMaximumOffset + sizeof(std::int32_t), false)) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(record),
+                             kRecordMaximumOffset + sizeof(std::int32_t))) {
         return false;
     }
 
@@ -179,11 +108,11 @@ bool ResolveTargetRecord(std::uintptr_t wrapper, std::uint32_t expected_id,
 
 bool ResolveGauge(std::uintptr_t object, std::uint32_t expected_id,
                   std::uint32_t& resolved_id) {
-    if (!IsAccessibleRange(reinterpret_cast<void*>(object), 0x38, true) ||
+    if (!dm::IsWritableRange(reinterpret_cast<void*>(object), 0x38) ||
         *reinterpret_cast<const std::uintptr_t*>(object) !=
-            g_exe_base + kCheatGaugeVtableRva ||
+            dm::Rva(kCheatGaugeVtableRva) ||
         *reinterpret_cast<const std::uintptr_t*>(object + kGaugeValueOffset) !=
-            g_exe_base + kGaugeValueVtableRva) {
+            dm::Rva(kGaugeValueVtableRva)) {
         return false;
     }
 
@@ -202,23 +131,23 @@ bool ResolveGaugeFromValue(void* value, std::uintptr_t& object, std::uint32_t& i
 
 bool ResolveAllGauges(std::uintptr_t information,
                       std::uintptr_t (&objects)[kTargetCount]) {
-    if (!IsAccessibleRange(reinterpret_cast<void*>(information), 0xF0, false) ||
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(information), 0xF0) ||
         *reinterpret_cast<const std::uintptr_t*>(information) !=
-            g_exe_base + kCheatInformationVtableRva) {
+            dm::Rva(kCheatInformationVtableRva)) {
         return false;
     }
 
     const auto map = information + kGaugeMapOffset;
     const auto head = *reinterpret_cast<const std::uintptr_t*>(map + 0x08);
     const auto count = *reinterpret_cast<const std::size_t*>(map + 0x10);
-    if (count != 7 || !IsAccessibleRange(reinterpret_cast<void*>(head), 0x20, false)) {
+    if (count != 7 || !dm::IsReadableRange(reinterpret_cast<void*>(head), 0x20)) {
         return false;
     }
 
     std::memset(objects, 0, sizeof(objects));
     auto node = *reinterpret_cast<const std::uintptr_t*>(head);
     for (std::size_t visited = 0; visited < count; ++visited) {
-        if (node == head || !IsAccessibleRange(reinterpret_cast<void*>(node), 0x20, false)) {
+        if (node == head || !dm::IsReadableRange(reinterpret_cast<void*>(node), 0x20)) {
             return false;
         }
         const auto next = *reinterpret_cast<const std::uintptr_t*>(node);
@@ -246,9 +175,9 @@ void ApplyActiveValue(std::uintptr_t object) {
 
 bool ResolveListItemData(std::uintptr_t object, std::uint32_t expected_id,
                          std::uint32_t& resolved_id) {
-    if (!IsAccessibleRange(reinterpret_cast<void*>(object), 0x28, true) ||
+    if (!dm::IsWritableRange(reinterpret_cast<void*>(object), 0x28) ||
         *reinterpret_cast<const std::uintptr_t*>(object) !=
-            g_exe_base + kListItemDataVtableRva) {
+            dm::Rva(kListItemDataVtableRva)) {
         return false;
     }
     const auto wrapper = *reinterpret_cast<const std::uintptr_t*>(
@@ -324,20 +253,20 @@ bool CaptureAndApplyAll(std::uintptr_t information, bool replace_snapshots) {
 }
 
 bool QuerySerializerLoading(void* serializer, bool& loading) {
-    if (!IsAccessibleRange(serializer, sizeof(std::uintptr_t), false)) return false;
+    if (!dm::IsReadableRange(serializer, sizeof(std::uintptr_t))) return false;
     const auto vtable = *reinterpret_cast<const std::uintptr_t*>(serializer);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(vtable + 0x20),
-                           sizeof(std::uintptr_t), false)) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(vtable + 0x20),
+                             sizeof(std::uintptr_t))) {
         return false;
     }
     const auto method = *reinterpret_cast<const std::uintptr_t*>(vtable + 0x20);
-    if (!IsExecutableAddress(reinterpret_cast<void*>(method))) return false;
+    if (!dm::IsExecutableAddress(reinterpret_cast<void*>(method))) return false;
     loading = reinterpret_cast<SerializerIsLoadingFn>(method)(serializer);
     return true;
 }
 
 void HookPopulateInformation(void* information) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     g_original_populate(information);
     if (g_shutting_down.load(std::memory_order_acquire)) return;
 
@@ -354,7 +283,7 @@ void HookPopulateInformation(void* information) {
 }
 
 void HookSerializeGaugeValue(void* value, void* serializer) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     std::uintptr_t object = 0;
     std::uint32_t id = 0;
     bool loading = false;
@@ -403,19 +332,19 @@ void HookSerializeGaugeValue(void* value, void* serializer) {
 
 void* HookBuildListItem(void* owner, void* output, void* record_reference,
                         std::int32_t current) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     void* result = g_original_build_list_item(owner, output, record_reference, current);
     if (g_shutting_down.load(std::memory_order_acquire) ||
-        !IsAccessibleRange(output, sizeof(std::uintptr_t), false) ||
-        !IsAccessibleRange(record_reference, sizeof(std::uintptr_t), false)) {
+        !dm::IsReadableRange(output, sizeof(std::uintptr_t)) ||
+        !dm::IsReadableRange(record_reference, sizeof(std::uintptr_t))) {
         return result;
     }
 
     const auto row = *reinterpret_cast<const std::uintptr_t*>(output);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(row),
-                           kListItemDataPointerOffset + sizeof(std::uintptr_t), false) ||
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(row),
+                             kListItemDataPointerOffset + sizeof(std::uintptr_t)) ||
         *reinterpret_cast<const std::uintptr_t*>(row) !=
-            g_exe_base + kListItemRowVtableRva) {
+            dm::Rva(kListItemRowVtableRva)) {
         return result;
     }
     const auto list_item = *reinterpret_cast<const std::uintptr_t*>(
@@ -452,16 +381,15 @@ bool InstallHooks() {
         0x48, 0x89, 0x5C, 0x24, 0x20, 0x55, 0x56, 0x57,
         0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x50,
     };
-    g_populate_target = reinterpret_cast<void*>(g_exe_base + kPopulateInformationRva);
-    g_serialize_target = reinterpret_cast<void*>(g_exe_base + kSerializeGaugeValueRva);
-    g_list_item_target = reinterpret_cast<void*>(g_exe_base + kBuildListItemRva);
-    if (!IsAccessibleRange(g_populate_target, sizeof(populate_prologue), false) ||
-        !IsAccessibleRange(g_serialize_target, sizeof(serialize_prologue), false) ||
-        !IsAccessibleRange(g_list_item_target, sizeof(list_item_prologue), false) ||
-        std::memcmp(g_populate_target, populate_prologue, sizeof(populate_prologue)) != 0 ||
-        std::memcmp(g_serialize_target, serialize_prologue, sizeof(serialize_prologue)) != 0 ||
-        std::memcmp(g_list_item_target, list_item_prologue,
-                    sizeof(list_item_prologue)) != 0) {
+    g_populate_target = reinterpret_cast<void*>(dm::Rva(kPopulateInformationRva));
+    g_serialize_target = reinterpret_cast<void*>(dm::Rva(kSerializeGaugeValueRva));
+    g_list_item_target = reinterpret_cast<void*>(dm::Rva(kBuildListItemRva));
+    if (!dm::MatchesPrologue(dm::Rva(kPopulateInformationRva), populate_prologue,
+                             sizeof(populate_prologue)) ||
+        !dm::MatchesPrologue(dm::Rva(kSerializeGaugeValueRva), serialize_prologue,
+                             sizeof(serialize_prologue)) ||
+        !dm::MatchesPrologue(dm::Rva(kBuildListItemRva), list_item_prologue,
+                             sizeof(list_item_prologue))) {
         Log("Build rejeitada: rotinas da Cheat Shop nao correspondem.");
         return false;
     }
@@ -519,7 +447,7 @@ void RemoveHooks() {
         if (g_populate_target != nullptr) MH_DisableHook(g_populate_target);
         if (g_serialize_target != nullptr) MH_DisableHook(g_serialize_target);
         if (g_list_item_target != nullptr) MH_DisableHook(g_list_item_target);
-        while (g_active_calls.load(std::memory_order_acquire) != 0) Sleep(0);
+        dm::DrainActiveCalls(g_active_calls);
         if (g_populate_target != nullptr) MH_RemoveHook(g_populate_target);
         if (g_serialize_target != nullptr) MH_RemoveHook(g_serialize_target);
         if (g_list_item_target != nullptr) MH_RemoveHook(g_list_item_target);
@@ -542,18 +470,8 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(
     const DmModHostContext* context) {
-    if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
-        context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||
-        context->loader->struct_size != sizeof(DmModLoaderApi) ||
-        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION) {
-        return FALSE;
-    }
-    g_loader = context->loader;
-    g_exe_base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    if (!ValidateExecutableBuild()) {
-        Log("Build do jogo rejeitada pelo fingerprint PE x64 esperado.");
-        return FALSE;
-    }
+    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    Log.Bind(context->loader, "cheat_shop");
     g_shutting_down.store(false, std::memory_order_release);
     return InstallHooks() ? TRUE : FALSE;
 }
@@ -591,8 +509,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(
 
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     RemoveHooks();
-    g_loader = nullptr;
-    g_exe_base = 0;
+    Log.Reset();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {

@@ -92,6 +92,9 @@ struct DmModHostContext {
     const DmModLoaderApi* loader;
     const char* game_directory;
     const char* mod_directory;
+    std::uintptr_t game_module_base;
+    std::size_t game_module_size;
+    BOOL game_build_verified;
 };
 
 using DmModGetAbiVersionFn = std::uint32_t(WINAPI*)();

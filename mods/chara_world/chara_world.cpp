@@ -11,7 +11,7 @@
 #include <limits>
 
 #include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
-#include "../../native/mod_loader/mod_loader_api.h"
+#include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
 
@@ -33,8 +33,6 @@ constexpr std::size_t kEffectValueOffset = 0x58;
 constexpr std::size_t kEffectTypeOffset = 0x44;
 constexpr std::uint32_t kParamBonusEffectId = 0x15;
 constexpr std::int32_t kMultiplierScale = 1000;
-constexpr DWORD kExpectedTimestamp = 0x6A6AB373;
-constexpr DWORD kExpectedImageSize = 0x00E01000;
 
 using TurnResolveFn = bool (*)(void* task);
 using InformationSyncFn = void (*)(void* information);
@@ -47,7 +45,6 @@ std::atomic<std::int32_t> g_tile_status_multiplier_scaled{kMultiplierScale};
 std::atomic<LONG> g_active_calls{0};
 std::atomic<bool> g_shutting_down{false};
 
-std::uintptr_t g_exe_base = 0;
 void* g_turn_hook_target = nullptr;
 void* g_information_hook_target = nullptr;
 void* g_param_bonus_hook_target = nullptr;
@@ -55,75 +52,18 @@ TurnResolveFn g_original_turn_resolve = nullptr;
 InformationSyncFn g_original_information_sync = nullptr;
 ParamBonusApplyFn g_original_param_bonus_apply = nullptr;
 bool g_minhook_initialized = false;
-const DmModLoaderApi* g_loader = nullptr;
+dm::HostLog Log;
 SRWLOCK g_param_bonus_lock = SRWLOCK_INIT;
 
-class HookScope {
-public:
-    HookScope() { g_active_calls.fetch_add(1, std::memory_order_acq_rel); }
-    ~HookScope() { g_active_calls.fetch_sub(1, std::memory_order_acq_rel); }
-};
-
-void Log(const char* message) {
-    if (g_loader != nullptr && g_loader->Log != nullptr) {
-        g_loader->Log("chara_world", message);
-    }
-}
-
-bool IsAccessibleRange(const void* address, std::size_t size, bool require_write) {
-    if (address == nullptr || size == 0) return false;
-
-    MEMORY_BASIC_INFORMATION information = {};
-    if (VirtualQuery(address, &information, sizeof(information)) != sizeof(information) ||
-        information.State != MEM_COMMIT ||
-        (information.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
-        return false;
-    }
-
-    const DWORD protection = information.Protect & 0xFF;
-    if (require_write && protection != PAGE_READWRITE && protection != PAGE_WRITECOPY &&
-        protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY) {
-        return false;
-    }
-
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    const auto end = reinterpret_cast<std::uintptr_t>(information.BaseAddress) +
-                     information.RegionSize;
-    return start <= end && size <= end - start;
-}
-
-bool ValidateExecutableBuild() {
-    if (g_exe_base == 0 ||
-        !IsAccessibleRange(reinterpret_cast<void*>(g_exe_base), sizeof(IMAGE_DOS_HEADER), false)) {
-        return false;
-    }
-
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(g_exe_base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return false;
-
-    const auto nt_address = g_exe_base + static_cast<std::uintptr_t>(dos->e_lfanew);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(nt_address), sizeof(IMAGE_NT_HEADERS64), false)) {
-        return false;
-    }
-
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(nt_address);
-    return nt->Signature == IMAGE_NT_SIGNATURE &&
-           nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
-           nt->FileHeader.TimeDateStamp == kExpectedTimestamp &&
-           nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-           nt->OptionalHeader.SizeOfImage == kExpectedImageSize;
-}
-
 std::int32_t* ResolveCurrentEnergyFromInformation(std::uintptr_t information) {
-    if (!IsAccessibleRange(reinterpret_cast<void*>(information),
-                           kCurrentEnergyOffset + sizeof(std::int32_t), true)) {
+    if (!dm::IsWritableRange(reinterpret_cast<void*>(information),
+                             kCurrentEnergyOffset + sizeof(std::int32_t))) {
         return nullptr;
     }
 
-    if (*reinterpret_cast<std::uintptr_t*>(information) !=
-            g_exe_base + kCharacterWorldInformationVtableRva ||
+    if (!dm::HasVtable(information, kCharacterWorldInformationVtableRva) ||
         *reinterpret_cast<std::uintptr_t*>(information + kEnergyValueOffset) !=
-            g_exe_base + kEnergyValueVtableRva) {
+            dm::Rva(kEnergyValueVtableRva)) {
         return nullptr;
     }
 
@@ -131,7 +71,7 @@ std::int32_t* ResolveCurrentEnergyFromInformation(std::uintptr_t information) {
 }
 
 std::int32_t* ResolveCurrentEnergyFromTask(void* task) {
-    if (!IsAccessibleRange(task, kInformationPointerOffset + sizeof(void*), false)) return nullptr;
+    if (!dm::IsReadableRange(task, kInformationPointerOffset + sizeof(void*))) return nullptr;
     const auto task_address = reinterpret_cast<std::uintptr_t>(task);
     const auto information = *reinterpret_cast<std::uintptr_t*>(
         task_address + kInformationPointerOffset);
@@ -145,49 +85,43 @@ struct ParamBonusDelta {
 };
 
 bool ResolveParamBonusDelta(void* task, ParamBonusDelta& output) {
-    if (!IsAccessibleRange(task,
-                           kParamBonusInformationPointerOffset + sizeof(void*), false)) {
+    if (!dm::IsReadableRange(task, kParamBonusInformationPointerOffset + sizeof(void*))) {
         return false;
     }
 
     const auto task_address = reinterpret_cast<std::uintptr_t>(task);
     const auto information = *reinterpret_cast<std::uintptr_t*>(
         task_address + kParamBonusInformationPointerOffset);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(information),
-                           kBonusPointerOffset + sizeof(void*), false) ||
-        *reinterpret_cast<std::uintptr_t*>(information) !=
-            g_exe_base + kCharacterWorldInformationVtableRva) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(information),
+                             kBonusPointerOffset + sizeof(void*)) ||
+        !dm::HasVtable(information, kCharacterWorldInformationVtableRva)) {
         return false;
     }
 
     const auto bonus = *reinterpret_cast<std::uintptr_t*>(information + kBonusPointerOffset);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(bonus), sizeof(std::uintptr_t), false) ||
-        *reinterpret_cast<std::uintptr_t*>(bonus) !=
-            g_exe_base + kCharacterWorldBonusVtableRva) {
-        return false;
-    }
+    if (!dm::HasVtable(bonus, kCharacterWorldBonusVtableRva)) return false;
 
     const auto effect = *reinterpret_cast<std::uintptr_t*>(information + kEffectPointerOffset);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(effect),
-                           kEffectValueOffset + sizeof(std::int64_t), true)) {
+    if (!dm::IsWritableRange(reinterpret_cast<void*>(effect),
+                             kEffectValueOffset + sizeof(std::int64_t))) {
         return false;
     }
 
     const auto descriptor = *reinterpret_cast<std::uintptr_t*>(
         effect + kEffectDescriptorPointerOffset);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(descriptor), sizeof(void*), false)) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(descriptor), sizeof(void*))) {
         return false;
     }
     const auto record = *reinterpret_cast<std::uintptr_t*>(descriptor);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(record), 0x8C, false) ||
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(record), 0x8C) ||
         *reinterpret_cast<std::uint32_t*>(record + 0x88) != kParamBonusEffectId) {
         return false;
     }
 
     const auto effect_data = *reinterpret_cast<std::uintptr_t*>(
         effect + kEffectDataPointerOffset);
-    if (!IsAccessibleRange(reinterpret_cast<void*>(effect_data),
-                           kEffectTypeOffset + sizeof(std::int32_t), false)) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(effect_data),
+                             kEffectTypeOffset + sizeof(std::int32_t))) {
         return false;
     }
     const std::int32_t type = *reinterpret_cast<std::int32_t*>(
@@ -202,16 +136,10 @@ bool ResolveParamBonusDelta(void* task, ParamBonusDelta& output) {
 
 std::int64_t ScalePositiveBonus(std::int64_t value, std::int32_t type,
                                 std::int32_t multiplier) {
-    if (value <= 0 || multiplier <= kMultiplierScale) return value;
     const std::int64_t maximum = type <= 2
         ? std::numeric_limits<std::int64_t>::max()
         : std::numeric_limits<std::int32_t>::max();
-    const std::int64_t quotient = value / kMultiplierScale;
-    const std::int64_t remainder = value % kMultiplierScale;
-    const std::int64_t extra =
-        (remainder * multiplier + (kMultiplierScale / 2)) / kMultiplierScale;
-    if (quotient > (maximum - extra) / multiplier) return maximum;
-    return quotient * multiplier + extra;
+    return dm::ScalePositive(value, multiplier, kMultiplierScale, maximum);
 }
 
 void ApplyConfiguredEnergy(std::int32_t* energy) {
@@ -226,7 +154,7 @@ void ApplyConfiguredEnergy(std::int32_t* energy) {
 }
 
 bool HookTurnResolve(void* task) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     ApplyConfiguredEnergy(ResolveCurrentEnergyFromTask(task));
     const bool result = g_original_turn_resolve(task);
     if (!g_shutting_down.load(std::memory_order_acquire)) {
@@ -236,7 +164,7 @@ bool HookTurnResolve(void* task) {
 }
 
 void HookInformationSync(void* information) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     ApplyConfiguredEnergy(ResolveCurrentEnergyFromInformation(
         reinterpret_cast<std::uintptr_t>(information)));
     g_original_information_sync(information);
@@ -247,7 +175,7 @@ void HookInformationSync(void* information) {
 }
 
 void HookParamBonusApply(void* task) {
-    HookScope scope;
+    dm::CallGuard scope(g_active_calls);
     const std::int32_t multiplier =
         g_tile_status_multiplier_scaled.load(std::memory_order_acquire);
     if (!g_enabled.load(std::memory_order_acquire) ||
@@ -292,20 +220,15 @@ bool InstallHooks() {
         0x81, 0x18, 0x02, 0x00, 0x00, 0x48, 0x8B, 0xE9
     };
 
-    g_turn_hook_target = reinterpret_cast<void*>(g_exe_base + kTurnResolveRva);
-    g_information_hook_target = reinterpret_cast<void*>(g_exe_base + kInformationSyncRva);
-    g_param_bonus_hook_target = reinterpret_cast<void*>(g_exe_base + kParamBonusApplyRva);
-    if (!IsAccessibleRange(g_turn_hook_target, sizeof(expected_turn_prologue), false) ||
-        std::memcmp(g_turn_hook_target, expected_turn_prologue,
-                    sizeof(expected_turn_prologue)) != 0 ||
-        !IsAccessibleRange(g_information_hook_target,
-                           sizeof(expected_information_prologue), false) ||
-        std::memcmp(g_information_hook_target, expected_information_prologue,
-                    sizeof(expected_information_prologue)) != 0 ||
-        !IsAccessibleRange(g_param_bonus_hook_target,
-                           sizeof(expected_param_bonus_prologue), false) ||
-        std::memcmp(g_param_bonus_hook_target, expected_param_bonus_prologue,
-                    sizeof(expected_param_bonus_prologue)) != 0) {
+    g_turn_hook_target = reinterpret_cast<void*>(dm::Rva(kTurnResolveRva));
+    g_information_hook_target = reinterpret_cast<void*>(dm::Rva(kInformationSyncRva));
+    g_param_bonus_hook_target = reinterpret_cast<void*>(dm::Rva(kParamBonusApplyRva));
+    if (!dm::MatchesPrologue(dm::Rva(kTurnResolveRva), expected_turn_prologue,
+                             sizeof(expected_turn_prologue)) ||
+        !dm::MatchesPrologue(dm::Rva(kInformationSyncRva), expected_information_prologue,
+                             sizeof(expected_information_prologue)) ||
+        !dm::MatchesPrologue(dm::Rva(kParamBonusApplyRva), expected_param_bonus_prologue,
+                             sizeof(expected_param_bonus_prologue))) {
         Log("Build rejeitada: rotinas do Chara World nao correspondem.");
         g_turn_hook_target = nullptr;
         g_information_hook_target = nullptr;
@@ -364,7 +287,7 @@ void RemoveHook() {
         if (g_information_hook_target != nullptr) MH_DisableHook(g_information_hook_target);
         if (g_param_bonus_hook_target != nullptr) MH_DisableHook(g_param_bonus_hook_target);
         while (g_active_calls.load(std::memory_order_acquire) != 0) {
-            Sleep(0);
+            SwitchToThread();
         }
         if (g_turn_hook_target != nullptr) MH_RemoveHook(g_turn_hook_target);
         if (g_information_hook_target != nullptr) MH_RemoveHook(g_information_hook_target);
@@ -388,20 +311,8 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
-        context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||
-        context->loader->struct_size != sizeof(DmModLoaderApi) ||
-        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION) {
-        return FALSE;
-    }
-
-    g_loader = context->loader;
-    g_exe_base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    if (!ValidateExecutableBuild()) {
-        Log("Build do jogo rejeitada pelo fingerprint PE x64 esperado.");
-        return FALSE;
-    }
-
+    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    Log.Bind(context->loader, "chara_world");
     g_shutting_down.store(false, std::memory_order_release);
     return InstallHooks() ? TRUE : FALSE;
 }
@@ -460,8 +371,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(
 
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     RemoveHook();
-    g_loader = nullptr;
-    g_exe_base = 0;
+    Log.Reset();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
