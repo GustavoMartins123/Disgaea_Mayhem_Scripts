@@ -35,13 +35,11 @@ Isso é responsabilidade do seu mod:
 
 ### O que o loader proíbe
 
-| Regra | Motivo |
-|---|---|
-| `DllMain` passivo — só `DisableThreadLibraryCalls` | Hook, thread ou chamada ao host sob o loader lock trava o processo |
-| Não se auto-ativar | O estado é do loader; auto-ativação cria duas autoridades |
-| Não chamar `LoadLibrary` para outro mod | Só o loader carrega plugins |
-| Não escrever `enabled.txt` nem `config.json` | O loader é o dono desses arquivos |
-| Não procurar DLL por padrão de nome | O `plugin` do manifesto é o único caminho aceito |
+- `DllMain` passivo — só `DisableThreadLibraryCalls`
+- Não se auto-ativar
+- Não chamar `LoadLibrary` para outro mod
+- Não escrever `enabled.txt` nem `config.json`
+- Não procurar DLL por padrão de nome; o `plugin` do manifesto é o único caminho aceito
 
 ---
 
@@ -131,9 +129,8 @@ struct DmModHostContext {
 };
 ```
 
-`game_module_base` e `game_build_verified` existem para você **não** repetir
-`GetModuleHandleW(nullptr)` nem carregar a sua própria cópia do timestamp da build.
-Quando o jogo receber patch, muda um lugar só: `mod_loader.cpp`.
+`game_module_base` e `game_build_verified` dispensam repetir `GetModuleHandleW(nullptr)`
+e o timestamp da build. O fingerprint fica só em `mod_loader.cpp`.
 
 ### O que você pode chamar de volta
 
@@ -150,10 +147,9 @@ struct DmModLoaderApi {
 
 Na prática, um mod comum só usa `Log`. O resto existe para o Mod Menu.
 
-**`SetModOption` não grava em disco.** Ele aplica no plugin e marca pendente; quem
-grava é `FlushModConfig`. Isso existe porque um slider arrastado reporta mudança a cada
-frame, e gravar com rename síncrono por frame trava a render thread. Se você chamar
-`SetModOption` de código próprio, chame `FlushModConfig` ao terminar a edição.
+**`SetModOption` não grava em disco.** Ele aplica no plugin e marca pendente; quem grava
+é `FlushModConfig`. Ao chamar `SetModOption` de código próprio, chame `FlushModConfig`
+ao terminar a edição.
 
 ---
 
@@ -163,18 +159,14 @@ frame, e gravar com rename síncrono por frame trava a render thread. Se você c
 
 É **header-only** — inlinado no seu DLL, sem indireção, sem passar pelo loader.
 
-### Por que header e não um serviço do loader
+Regra de escolha: **hot path sem estado compartilhado → header; estado único do
+processo → loader.**
 
 | | Header (`dm::`) | Serviço (`DmModLoaderApi`) |
 |---|---|---|
 | Custo | Inlinado, zero indireção | Chamada indireta cruzando DLL |
 | Estado | Um por plugin | Um por processo |
-| Serve para | Validação em hot path, matemática, guardas | Estado único: config, ciclo de vida, identidade da build |
-
-`dm::IsAccessibleRange` roda milhares de vezes por segundo dentro de hooks. Como serviço
-do loader ela ficaria **mais lenta que código duplicado**. Serviço é bom para o raro e
-único, ruim para hot path. Use a regra: **hot path sem estado compartilhado → header;
-estado único do processo → loader.**
+| Serve para | Validação em hot path, matemática, guardas | Config, ciclo de vida, identidade da build |
 
 ### O que o header oferece
 
@@ -200,9 +192,7 @@ std::int64_t dm::ScalePositive(valor, multiplicador, escala, maximo);
 ```
 
 `IsReadableRange`/`IsWritableRange` mantêm um cache `thread_local` da última região
-consultada, o que elimina a maioria das `VirtualQuery` em hooks que revalidam o mesmo
-objeto. O cache é `thread_local` e não global de propósito: compartilhado entre threads,
-uma leitura rasgada de base/tamanho faria a função aceitar um endereço inválido.
+consultada.
 
 ---
 
@@ -304,8 +294,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
 }
 ```
 
-Ao instalar mais de um hook, use `MH_QueueEnableHook` para cada e **um**
-`MH_ApplyQueued` no fim: cada `MH_EnableHook` congela todas as threads do processo.
+Ao instalar mais de um hook, use `MH_QueueEnableHook` para cada e um `MH_ApplyQueued`
+no fim.
 
 ### `Mod_SetOption` com options
 
@@ -322,8 +312,8 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, cons
 }
 ```
 
-O loader já validou tipo e intervalo. Revalide mesmo assim: `FALSE` aqui marca o mod
-como falho, o que é melhor que aplicar um valor incoerente.
+O loader já validou tipo e intervalo. Revalide mesmo assim; `FALSE` marca o mod como
+falho.
 
 ---
 
@@ -367,8 +357,8 @@ Compila com `-Wall -Wextra -Werror`; warning quebra o build.
 | `Versao de ABI incompativel` | `Mod_GetAbiVersion` diferente de `DM_MOD_LOADER_ABI_VERSION` |
 | `id duplicado rejeitado` | Dois manifestos com o mesmo `id` |
 
-Um manifesto rejeitado não derruba os outros: o loader registra o motivo e segue. A
-exceção é o system mod obrigatório — se ele falhar, o bootstrap termina fail-closed.
+Um manifesto rejeitado não derruba os outros; o loader registra o motivo e segue. Se o
+system mod obrigatório falhar, o bootstrap termina fail-closed.
 
 ---
 

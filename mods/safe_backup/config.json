@@ -1,5 +1,7 @@
 {
   "schema_version": 1,
   "mod_id": "safe_backup",
-  "options": {}
+  "options": {
+    "max_backups": 20
+  }
 }

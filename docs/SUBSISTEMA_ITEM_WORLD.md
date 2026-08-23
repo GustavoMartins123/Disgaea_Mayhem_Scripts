@@ -71,6 +71,26 @@ No fluxo de recompensas do Item World, a chamada ocorre em RVA `0x003C64CE`. O
 plugin reconhece somente essa chamada e pode elevar o resultado até a raridade
 mínima escolhida. As outras chamadas do jogo continuam usando o valor normal.
 
+### Call sites de `0x001D58A0`
+
+Varredura de `call`/`jmp rel32` no executável (build `0x6A6AB373`,
+`SizeOfImage 0x00E01000`):
+
+| Call site | Endereço de retorno | Reconhecido pelo plugin |
+| --- | --- | --- |
+| `0x001D5C01` | `0x001D5C06` | não |
+| `0x003C64CE` | `0x003C64D3` | **sim** |
+| `0x003F71C6` | `0x003F71CB` | não |
+| `0x003F75EE` | `0x003F75F3` | não |
+| `0x0042649F` | `0x004264A4` | não |
+| `0x00465739` | `0x0046573E` | não |
+
+`HookGenerateRarity` compara `__builtin_return_address(0)` com `0x003C64D3` e
+devolve o valor original nos demais casos. A option atinge 1 de 6 caminhos.
+
+Falta identificar o que cada um dos outros cinco alimenta antes de ampliar o
+filtro.
+
 ## Multiplicadores do plugin
 
 O plugin oferece três grupos independentes: progresso de nível, Item Points e

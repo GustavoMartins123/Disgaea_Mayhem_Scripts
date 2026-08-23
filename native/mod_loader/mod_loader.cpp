@@ -985,7 +985,6 @@ struct LifecycleGuard {
     ~LifecycleGuard() { ReleaseSRWLockExclusive(&g_lifecycle_lock); }
 };
 
-// Requer g_lifecycle_lock.
 bool FlushRecordConfig(ModRecord& record) {
     if (!record.config_dirty) return true;
     if (PersistConfig(record)) {

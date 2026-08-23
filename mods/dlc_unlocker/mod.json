@@ -8,8 +8,5 @@
   "description": "Permite resgatar novamente os cinco consumíveis injetados pelo SmokeAPI sem alterar as tabelas do jogo nem marcá-los como DLCs recebidos.",
   "type": "toggle",
   "load_order": 210,
-  "plugin": "dlc_unlocker.dll",
-  "components": [
-    "mods/dlc_unlocker/dlc_unlocker.dll"
-  ]
+  "plugin": "dlc_unlocker.dll"
 }

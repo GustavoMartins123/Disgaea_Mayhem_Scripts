@@ -8,8 +8,5 @@
   "description": "Garante a aprovação das propostas enquanto estiver ativo, sem modificar o banco local.",
   "type": "toggle",
   "load_order": 120,
-  "plugin": "dark_assembly.dll",
-  "components": [
-    "mods/dark_assembly/dark_assembly.dll"
-  ]
+  "plugin": "dark_assembly.dll"
 }

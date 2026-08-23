@@ -8,8 +8,5 @@
   "description": "Mantém EXP, Mana, HL, Weapon Mastery e Item Drops em 5000% enquanto estiver ativo, sem alterar o banco local.",
   "type": "toggle",
   "load_order": 200,
-  "plugin": "cheat_shop.dll",
-  "components": [
-    "mods/cheat_shop/cheat_shop.dll"
-  ]
+  "plugin": "cheat_shop.dll"
 }

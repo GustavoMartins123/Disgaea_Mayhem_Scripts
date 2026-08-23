@@ -10,10 +10,6 @@
 
 #include "mod_loader_api.h"
 
-// Reuso em tempo de compilacao para plugins ABI v1. Inlinado em cada DLL, sem
-// indirecao. Servicos com estado unico do processo ficam no loader, nao aqui.
-// Ver docs/GUIA_CRIAR_MOD.md.
-
 namespace dm {
 
 struct GameImage {
@@ -35,8 +31,6 @@ struct RegionInfo {
     DWORD protect = 0;
 };
 
-// thread_local e nao global: um cache compartilhado entre threads permitiria leitura
-// rasgada de base/size e faria IsAccessibleRange aceitar um endereco invalido.
 inline thread_local RegionInfo t_region_cache;
 
 inline bool ProtectAllows(DWORD protect, bool require_write) {
@@ -133,7 +127,6 @@ private:
     const char* component_ = "plugin";
 };
 
-// Contrato minimo de Mod_Initialize: valida o contexto e publica a imagem do jogo.
 inline bool AcceptHostContext(const DmModHostContext* context, bool require_verified_build) {
     if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
         context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||

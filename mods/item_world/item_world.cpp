@@ -22,6 +22,8 @@ constexpr std::uintptr_t kItemWorldRarityReturnRva = 0x003C64D3;
 constexpr std::uintptr_t kItemWorldVtableRva = 0x00A251F0;
 constexpr std::size_t kLevelProgressOffset = 0x68;
 constexpr LONG kMultiplierScale = 1000;
+constexpr float kLevelMultiplierMax = 20.0F;
+constexpr float kItemPointMultiplierMax = 200.0F;
 
 using ApplyRewardsFn = void (*)(void* item_world, void* result_context);
 using AccumulateItemPointsFn = void (*)(void* item_world, std::int64_t base_points);
@@ -200,9 +202,6 @@ bool InstallHooks() {
     return true;
 }
 
-// Cada hook segue o toggle do mod E a option correspondente. Só options do tipo
-// toggle entram aqui: uma option de slider dispararia Mod_SetOption a cada frame de
-// arraste, e cada mudanca de estado de hook congela todas as threads do processo.
 bool SyncHookStates() {
     if (!g_minhook_initialized) return false;
     const bool mod_enabled = InterlockedCompareExchange(&g_enabled, FALSE, FALSE) != FALSE;
@@ -320,19 +319,18 @@ __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValu
         return TRUE;
     }
 
+    const bool is_level = std::strcmp(key, "level_exp_multiplier") == 0;
+    const bool is_item_points = std::strcmp(key, "item_point_multiplier") == 0;
+    if (!is_level && !is_item_points) return FALSE;
+
+    const float maximum = is_item_points ? kItemPointMultiplierMax : kLevelMultiplierMax;
     if (value->type != DmOptionType::SliderFloat || !std::isfinite(value->float_value) ||
-        value->float_value < 1.0F || value->float_value > 20.0F) return FALSE;
+        value->float_value < 1.0F || value->float_value > maximum) return FALSE;
 
     const LONG scaled = static_cast<LONG>(std::lround(value->float_value * kMultiplierScale));
-    if (std::strcmp(key, "level_exp_multiplier") == 0) {
-        InterlockedExchange(&g_level_multiplier_scaled, scaled);
-        return TRUE;
-    }
-    if (std::strcmp(key, "item_point_multiplier") == 0) {
-        InterlockedExchange(&g_item_point_multiplier_scaled, scaled);
-        return TRUE;
-    }
-    return FALSE;
+    InterlockedExchange(
+        is_level ? &g_level_multiplier_scaled : &g_item_point_multiplier_scaled, scaled);
+    return TRUE;
 }
 
 __declspec(dllexport) void WINAPI Mod_Shutdown() {

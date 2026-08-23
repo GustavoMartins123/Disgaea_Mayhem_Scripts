@@ -9,9 +9,6 @@
   "type": "toggle",
   "load_order": 100,
   "plugin": "chara_world.dll",
-  "components": [
-    "mods/chara_world/chara_world.dll"
-  ],
   "options": [
     {
       "id": "locked_energy",

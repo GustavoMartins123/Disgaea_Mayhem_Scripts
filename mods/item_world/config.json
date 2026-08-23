@@ -5,8 +5,8 @@
     "level_exp_enabled": true,
     "level_exp_multiplier": 20,
     "item_points_enabled": true,
-    "item_point_multiplier": 20,
+    "item_point_multiplier": 1000,
     "rarity_enabled": true,
-    "minimum_rarity": 80
+    "minimum_rarity": 100
   }
 }

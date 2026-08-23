@@ -49,8 +49,8 @@ O rotulo integrado ao Main Menu ainda depende de um gravador NMPLTEX/YKCMP. O in
 ## Mods atuais
 
 - `chara_world`: energia configurável e multiplicador dos atributos ganhos nos tiles.
-- `safe_backup`: cria um backup inicial e novos backups quando `save.002` muda.
-- `item_world`: controles separados para progresso de nível, Item Points e raridade mínima dos equipamentos obtidos.
+- `safe_backup`: backup inicial e a cada gravação de `save.002`, mantendo os N mais recentes por slot (`max_backups`).
+- `item_world`: progresso de nível (até 20x), Item Points (até 200x) e raridade mínima. A raridade cobre apenas um dos seis call sites de `GenerateRarity`; ver `docs/SUBSISTEMA_ITEM_WORLD.md`.
 - `cheat_shop`: mantém EXP, Mana, HL, Weapon Mastery e Item Drops em `5000%` enquanto estiver ativo. O valor de Item Drops pode aumentar muito a quantidade de recompensas.
 - `dark_assembly`: aprovação garantida em memória, sem substituir `wish.dat`.
 - `dlc_unlocker`: toggle residente que confirma em memória o consumo dos cinco itens simulados pelo SmokeAPI.

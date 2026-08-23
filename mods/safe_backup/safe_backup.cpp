@@ -6,12 +6,18 @@
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
+#include <atomic>
+#include <string>
+#include <vector>
+
 #include "../../native/mod_loader/mod_loader_api.h"
 
 static char g_save_dir[MAX_PATH] = {};
 static char g_backup_dir[MAX_PATH] = {};
 static HANDLE g_stop_event = NULL;
 static HANDLE g_backup_thread = NULL;
+static std::atomic<int> g_max_backups{20};
 
 // -----------------------------------------------------------------------------
 // Auto-Discovery: Find Disgaea Mayhem Save Directory in AppData
@@ -42,6 +48,34 @@ static bool GetDisgaeaSaveDir(char* out_path, size_t max_len) {
     return false;
 }
 
+static void RotateBackups(const char* backup_dest_dir, const char* slot_name) {
+    const int keep = g_max_backups.load(std::memory_order_acquire);
+    if (keep <= 0) return;
+
+    char pattern[MAX_PATH] = {};
+    snprintf(pattern, sizeof(pattern), "%s\\%s_*.bak", backup_dest_dir, slot_name);
+
+    WIN32_FIND_DATAA fd = {};
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    std::vector<std::string> names;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) names.push_back(fd.cFileName);
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+
+    if (static_cast<int>(names.size()) <= keep) return;
+    std::sort(names.begin(), names.end());
+
+    const size_t excess = names.size() - static_cast<size_t>(keep);
+    for (size_t i = 0; i < excess; ++i) {
+        char victim[MAX_PATH] = {};
+        snprintf(victim, sizeof(victim), "%s\\%s", backup_dest_dir, names[i].c_str());
+        DeleteFileA(victim);
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Perform Safe Timestamped Backup
 // -----------------------------------------------------------------------------
@@ -67,7 +101,7 @@ static void BackupAllSaves(const char* save_dir, const char* backup_dest_dir) {
                 snprintf(dst_file, sizeof(dst_file), "%s\\%s_%s.bak", backup_dest_dir, fd.cFileName, time_str);
 
                 CopyFileA(src_file, dst_file, FALSE);
-                printf("[BACKUP SEGURO] Criado: %s\n", dst_file);
+                RotateBackups(backup_dest_dir, fd.cFileName);
             }
         } while (FindNextFileA(hFind, &fd));
         FindClose(hFind);
@@ -151,42 +185,18 @@ extern "C" {
         return TRUE;
     }
 
-    __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char*, const DmModValue*) {
-        return FALSE;
+    __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValue* value) {
+        if (key == NULL || value == NULL || value->struct_size != sizeof(DmModValue)) return FALSE;
+        if (strcmp(key, "max_backups") != 0) return FALSE;
+        if (value->type != DmOptionType::SliderInt ||
+            value->int_value < 1 || value->int_value > 200) {
+            return FALSE;
+        }
+        g_max_backups.store(value->int_value, std::memory_order_release);
+        return TRUE;
     }
 
     __declspec(dllexport) void WINAPI Mod_Shutdown() {
         Mod_Disable();
     }
-}
-
-int main() {
-    SetConsoleOutputCP(CP_UTF8);
-
-    printf("=================================================================\n");
-    printf("  DISGAEA MAYHEM - GUARDIÃO DE BACKUP SEGURO DE SAVES (C++)\n");
-    printf("=================================================================\n");
-
-    char save_dir[MAX_PATH] = {};
-    if (!GetDisgaeaSaveDir(save_dir, sizeof(save_dir))) {
-        printf("[ERRO] Nao foi possivel auto-localizar a pasta de saves em AppData.\n");
-        return 1;
-    }
-
-    printf("[OK] Pasta de Saves auto-descoberta:\n     %s\n\n", save_dir);
-
-    char backup_dir[MAX_PATH] = {};
-    char self_path[MAX_PATH] = {};
-    GetModuleFileNameA(NULL, self_path, MAX_PATH);
-    char* last_slash = strrchr(self_path, '\\');
-    if (last_slash) *last_slash = '\0';
-    snprintf(backup_dir, sizeof(backup_dir), "%s\\backups", self_path);
-    CreateDirectoryA(backup_dir, NULL);
-
-    BackupAllSaves(save_dir, backup_dir);
-
-    printf("\n=================================================================\n");
-    printf("[SUCESSO] Backup completo dos saves gerado em:\n  %s\n", backup_dir);
-    printf("=================================================================\n");
-    return 0;
 }

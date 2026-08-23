@@ -97,8 +97,8 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 
 - `mod_menu`: system mod ABI v1; nao gerencia DLLs.
 - `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
-- `safe_backup`: uma unica worker, evento de parada, backup inicial e novos backups quando `save.002` muda.
-- `item_world`: multiplica separadamente os pontos de nível e os Item Points e pode impor uma raridade mínima somente aos equipamentos obtidos no Item World.
+- `safe_backup`: uma unica worker, evento de parada, backup inicial e a cada gravação de `save.002`, com rotação pela option `max_backups`.
+- `item_world`: multiplica separadamente os pontos de nível (até 20x) e os Item Points (até 200x). A raridade mínima atinge só um dos seis call sites de `GenerateRarity`.
 - `cheat_shop`: toggle residente que mantém os cinco valores em 5000 e restaura os anteriores ao ser desativado, sem alterar o banco local ou o save.
 - `dark_assembly`: toggle residente que garante a aprovação em memória e não altera `wish.dat`.
 - `dlc_unlocker`: toggle residente que confirma em memória o consumo das definições `1` a `5` injetadas pelo SmokeAPI.

@@ -33,25 +33,12 @@ constexpr LONG STATUS_HOOKS_INSTALLED = 1;
 constexpr LONG STATUS_RENDER_READY = 2;
 constexpr LONG STATUS_FAILED = -1;
 constexpr UINT SRV_DESCRIPTOR_COUNT = 64;
-constexpr std::uint8_t MAIN_MENU_INPUT_ENABLED = 1;
-constexpr std::size_t MAIN_MENU_INPUT_OFFSET = 0x220;
 
-#pragma pack(push, 1)
-struct SharedState {
-    volatile std::uint8_t open_request;
-    volatile std::uint8_t pass_give_up;
-    std::uint8_t reserved0[6];
-    volatile std::uint64_t main_menu;
+struct OverlayStatus {
     volatile LONG status;
     volatile LONG error_code;
-    std::uint8_t reserved1[8];
     char error_message[256];
 };
-#pragma pack(pop)
-
-static_assert(offsetof(SharedState, main_menu) == 8, "shared main-menu offset changed");
-static_assert(offsetof(SharedState, status) == 16, "shared status offset changed");
-static_assert(offsetof(SharedState, error_message) == 32, "shared error offset changed");
 
 struct FrameContext {
     ID3D12CommandAllocator* allocator = nullptr;
@@ -67,8 +54,7 @@ using ExecuteCommandListsFn = void(STDMETHODCALLTYPE*)(
     ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
 
 HMODULE g_module = nullptr;
-static SharedState g_embedded_shared = {};
-SharedState* g_shared = &g_embedded_shared;
+OverlayStatus g_shared = {};
 
 PresentFn g_original_present = nullptr;
 ResizeBuffersFn g_original_resize_buffers = nullptr;
@@ -121,19 +107,14 @@ public:
 };
 
 void SetStatus(LONG status) {
-    if (g_shared != nullptr) {
-        InterlockedExchange(&g_shared->status, status);
-    }
+    InterlockedExchange(&g_shared.status, status);
 }
 
 void SetFailure(LONG code, const char* message) {
-    if (g_shared == nullptr) {
-        return;
-    }
-    InterlockedExchange(&g_shared->error_code, code);
-    std::snprintf(g_shared->error_message, sizeof(g_shared->error_message), "%s", message);
+    InterlockedExchange(&g_shared.error_code, code);
+    std::snprintf(g_shared.error_message, sizeof(g_shared.error_message), "%s", message);
     MemoryBarrier();
-    InterlockedExchange(&g_shared->status, STATUS_FAILED);
+    InterlockedExchange(&g_shared.status, STATUS_FAILED);
 }
 
 bool IsWritableAddress(void* address, std::size_t size) {
@@ -149,24 +130,6 @@ bool IsWritableAddress(void* address, std::size_t size) {
     const auto region_end = reinterpret_cast<std::uintptr_t>(information.BaseAddress) +
                             information.RegionSize;
     return start <= region_end && size <= region_end - start;
-}
-
-bool SetMainMenuInputEnabled() {
-    if (g_shared == nullptr || g_shared->main_menu == 0) {
-        return true;
-    }
-    const uintptr_t main_menu_ptr = static_cast<uintptr_t>(g_shared->main_menu);
-    if (!IsWritableAddress(reinterpret_cast<void*>(main_menu_ptr), 0x240)) {
-        g_shared->main_menu = 0;
-        return true;
-    }
-    
-    // Re-enable input flag in Main Menu object
-    auto* input = reinterpret_cast<volatile std::uint8_t*>(main_menu_ptr + MAIN_MENU_INPUT_OFFSET);
-    *input = MAIN_MENU_INPUT_ENABLED;
-
-    g_shared->main_menu = 0;
-    return true;
 }
 
 typedef DWORD(WINAPI* PFN_XInputGetState)(DWORD dwUserIndex, XINPUT_STATE* pState);
@@ -201,8 +164,12 @@ struct InputSnapshot {
     SHORT ry = 0;
     bool pad_menu_hotkey = false;
     bool pad_b = false;
+    bool pad_max = false;
+    bool pad_min = false;
     bool key_menu_hotkey = false;
     bool key_escape = false;
+    bool key_max = false;
+    bool key_min = false;
 };
 
 InputSnapshot g_input = {};
@@ -212,9 +179,12 @@ ULONGLONG g_next_pad_rescan = 0;
 void PollInput() {
     InputSnapshot snapshot = {};
     snapshot.key_escape = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    snapshot.key_max = (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+    snapshot.key_min = (GetAsyncKeyState(VK_END) & 0x8000) != 0;
     snapshot.key_menu_hotkey = (GetAsyncKeyState(VK_F1) & 0x8000) != 0 ||
                                (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0 ||
-                               (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+                               (snapshot.key_max &&
+                                !g_overlay_visible.load(std::memory_order_acquire));
 
     const ULONGLONG now = GetTickCount64();
     const bool rescan = now >= g_next_pad_rescan;
@@ -242,6 +212,10 @@ void PollInput() {
                             (buttons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
         snapshot.pad_menu_hotkey = snapshot.pad_menu_hotkey || thumbs ||
                                    (buttons & XINPUT_GAMEPAD_BACK) != 0;
+        snapshot.pad_max = snapshot.pad_max ||
+                           state.Gamepad.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+        snapshot.pad_min = snapshot.pad_min ||
+                           state.Gamepad.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
 
         if (std::abs(state.Gamepad.sThumbLX) > std::abs(snapshot.lx)) snapshot.lx = state.Gamepad.sThumbLX;
         if (std::abs(state.Gamepad.sThumbLY) > std::abs(snapshot.ly)) snapshot.ly = state.Gamepad.sThumbLY;
@@ -946,11 +920,6 @@ void FlushAllModConfigs();
 void UpdateOverlayState() {
     PollInput();
     const bool was_visible = g_overlay_visible.load(std::memory_order_acquire);
-    if (g_shared != nullptr && g_shared->open_request != 0) {
-        g_shared->open_request = 0;
-        OpenOverlay();
-    }
-
     if (ModMenuHotkeyKeyboardPressed() || ModMenuHotkeyGamepadPressed()) {
         if (g_overlay_visible.load(std::memory_order_acquire)) {
             CloseOverlay();
@@ -1185,12 +1154,16 @@ struct GamepadNavState {
     ActiveFocusPanel active_panel = ActiveFocusPanel::LeftList;
     int focused_option = 0; // 0 = main action/toggle, 1..N = mod options (1-indexed)
     float right_stick_scroll = 0.0f;
+    bool last_max = false;
+    bool last_min = false;
 };
 static GamepadNavState g_gp_nav = {};
 
 void ProcessGamepadNavigation(float /*dt*/) {
     if (!g_overlay_visible || g_discovered_mods.empty()) {
         g_gp_nav.last_buttons = 0;
+        g_gp_nav.last_max = false;
+        g_gp_nav.last_min = false;
         return;
     }
 
@@ -1216,6 +1189,13 @@ void ProcessGamepadNavigation(float /*dt*/) {
     const bool last_a = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_A) != 0;
     const bool last_lb = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
     const bool last_rb = (g_gp_nav.last_buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
+
+    const bool max_down = g_input.pad_max || g_input.key_max;
+    const bool min_down = g_input.pad_min || g_input.key_min;
+    const bool want_max = max_down && !g_gp_nav.last_max;
+    const bool want_min = min_down && !g_gp_nav.last_min;
+    g_gp_nav.last_max = max_down;
+    g_gp_nav.last_min = min_down;
 
     // LB / RB: Toggle focus between Left List and Right Options
     if ((lb && !last_lb) || (rb && !last_rb)) {
@@ -1293,6 +1273,8 @@ void ProcessGamepadNavigation(float /*dt*/) {
                 if (opt_idx < mod.options.size()) {
                     auto& opt = mod.options[opt_idx];
                     const int step_int = (opt.max_int - opt.min_int > 50) ? 5 : 1;
+                    const float span = opt.max_float - opt.min_float;
+                    const float step_float = span > 50.0f ? span / 100.0f : 0.5f;
                     bool changed = false;
 
                     if (opt.type == OptionType::SliderInt) {
@@ -1309,20 +1291,26 @@ void ProcessGamepadNavigation(float /*dt*/) {
                             if (opt.int_val > opt.max_int) opt.int_val = opt.min_int;
                             changed = true;
                         }
+                        if (want_max) { opt.int_val = opt.max_int; changed = true; }
+                        if (want_min) { opt.int_val = opt.min_int; changed = true; }
                     } else if (opt.type == OptionType::SliderFloat) {
                         if (left && !last_left) {
-                            opt.float_val = std::max(opt.min_float, opt.float_val - 0.5f);
+                            opt.float_val = std::max(opt.min_float, opt.float_val - step_float);
                             changed = true;
                         }
                         if (right && !last_right) {
-                            opt.float_val = std::min(opt.max_float, opt.float_val + 0.5f);
+                            opt.float_val = std::min(opt.max_float, opt.float_val + step_float);
                             changed = true;
                         }
+                        if (want_max) { opt.float_val = opt.max_float; changed = true; }
+                        if (want_min) { opt.float_val = opt.min_float; changed = true; }
                     } else if (opt.type == OptionType::Toggle) {
                         if ((left && !last_left) || (right && !last_right) || (a_btn && !last_a)) {
                             opt.bool_val = !opt.bool_val;
                             changed = true;
                         }
+                        if (want_max) { opt.bool_val = true; changed = true; }
+                        if (want_min) { opt.bool_val = false; changed = true; }
                     }
 
                     if (changed) {
@@ -1730,7 +1718,8 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
     ImGui::TextWrapped(
-        "Abrir: Select / L3+R3 / F1  |  Painel: LB/RB  |  D-Pad: navegar  |  A: confirmar");
+        "Abrir: Select / L3+R3 / F1  |  Painel: LB/RB  |  D-Pad: navegar  |  A: confirmar"
+        "  |  Maximo: RT / Home  |  Minimo: LT / End");
     ImGui::PopStyleColor();
     if (ImGui::SmallButton("Voltar ao jogo (B / Esc)")) {
         CloseOverlay();
@@ -1822,7 +1811,7 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swap_chain, UINT sync_inte
     HookScope scope;
     if (!g_shutting_down.load(std::memory_order_acquire)) {
         AcquireSRWLockExclusive(&g_lock);
-        if (g_shared != nullptr && g_shared->status != STATUS_FAILED) {
+        if (g_shared.status != STATUS_FAILED) {
             if (g_swap_chain == nullptr) {
                 InitializeRenderer(swap_chain);
             } else if (reinterpret_cast<IDXGISwapChain*>(g_swap_chain) == swap_chain) {
@@ -2066,10 +2055,9 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostConte
     }
 
     g_loader_api = context->loader;
-    g_shared = &g_embedded_shared;
-    InterlockedExchange(&g_shared->status, STATUS_WAITING);
-    InterlockedExchange(&g_shared->error_code, 0);
-    g_shared->error_message[0] = '\0';
+    InterlockedExchange(&g_shared.status, STATUS_WAITING);
+    InterlockedExchange(&g_shared.error_code, 0);
+    g_shared.error_message[0] = '\0';
     ScanAndDiscoverMods();
     return TRUE;
 }
@@ -2079,7 +2067,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
     g_shutting_down.store(false, std::memory_order_release);
     if (!CreateHooks()) {
         if (g_loader_api != nullptr && g_loader_api->Log != nullptr) {
-            g_loader_api->Log("mod_menu", g_shared->error_message);
+            g_loader_api->Log("mod_menu", g_shared.error_message);
         }
         return FALSE;
     }
@@ -2099,7 +2087,6 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
         return FALSE;
     }
     AcquireSRWLockExclusive(&g_lock);
-    if (g_overlay_visible || g_waiting_for_back_release) SetMainMenuInputEnabled();
     DestroyRenderer();
     SafeRelease(g_queue);
     SetStatus(STATUS_WAITING);

@@ -271,9 +271,6 @@ bool InstallHooks() {
     return true;
 }
 
-// Os hooks de energia seguem o toggle freeze_energy; o de bonus segue so o mod.
-// tile_status_multiplier e slider e por isso nao gatilha hook: Mod_SetOption dispara a
-// cada frame de arraste, e cada mudanca de estado congela todas as threads do processo.
 bool SyncHookStates() {
     if (!g_minhook_initialized || g_turn_hook_target == nullptr ||
         g_information_hook_target == nullptr || g_param_bonus_hook_target == nullptr) {

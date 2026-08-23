@@ -2,11 +2,20 @@
   "schema_version": 1,
   "id": "safe_backup",
   "name": "Guardião de Backup Seguro",
-  "version": "1.0.1",
-  "author": "Antigravity",
+  "version": "1.1.0",
+  "author": "Disgaea Mayhem Mod Team",
   "category": "QoL & Protecao",
   "type": "toggle",
-  "load_order": 120,
-  "description": "Cria um backup inicial e novos backups com data e hora quando o arquivo save.002 muda.",
-  "plugin": "safe_backup.dll"
+  "load_order": 130,
+  "description": "Copia os saves ao iniciar e sempre que o jogo grava, mantendo apenas os N backups mais recentes de cada slot.",
+  "plugin": "safe_backup.dll",
+  "options": [
+    {
+      "id": "max_backups",
+      "name": "Backups Mantidos por Slot",
+      "type": "slider_int",
+      "min": 1,
+      "max": 200
+    }
+  ]
 }
