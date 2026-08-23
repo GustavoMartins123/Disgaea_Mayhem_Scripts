@@ -407,14 +407,7 @@ bool InstallHooks() {
                       reinterpret_cast<LPVOID*>(&g_original_serialize)) != MH_OK ||
         MH_CreateHook(g_list_item_target,
                       reinterpret_cast<LPVOID>(&HookBuildListItem),
-                      reinterpret_cast<LPVOID*>(&g_original_build_list_item)) != MH_OK ||
-        MH_QueueEnableHook(g_populate_target) != MH_OK ||
-        MH_QueueEnableHook(g_serialize_target) != MH_OK ||
-        MH_QueueEnableHook(g_list_item_target) != MH_OK ||
-        MH_ApplyQueued() != MH_OK) {
-        MH_DisableHook(g_populate_target);
-        MH_DisableHook(g_serialize_target);
-        MH_DisableHook(g_list_item_target);
+                      reinterpret_cast<LPVOID*>(&g_original_build_list_item)) != MH_OK) {
         MH_RemoveHook(g_populate_target);
         MH_RemoveHook(g_serialize_target);
         MH_RemoveHook(g_list_item_target);
@@ -430,6 +423,16 @@ bool InstallHooks() {
         return false;
     }
     return true;
+}
+
+bool SetHooksEnabled(bool enabled) {
+    if (!g_minhook_initialized || g_populate_target == nullptr ||
+        g_serialize_target == nullptr || g_list_item_target == nullptr) {
+        return false;
+    }
+    const auto queue = enabled ? &MH_QueueEnableHook : &MH_QueueDisableHook;
+    return queue(g_populate_target) == MH_OK && queue(g_serialize_target) == MH_OK &&
+           queue(g_list_item_target) == MH_OK && MH_ApplyQueued() == MH_OK;
 }
 
 void RemoveHooks() {
@@ -477,14 +480,18 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
-    if (!g_minhook_initialized || g_populate_target == nullptr ||
-        g_serialize_target == nullptr || g_list_item_target == nullptr) {
-        return FALSE;
-    }
     AcquireSRWLockExclusive(&g_state_lock);
     if (g_information != 0 && !CaptureAndApplyAll(g_information, true)) {
         ReleaseSRWLockExclusive(&g_state_lock);
         Log("Ativacao rejeitada: estrutura completa da Cheat Shop nao encontrada.");
+        return FALSE;
+    }
+    if (!SetHooksEnabled(true)) {
+        for (GaugeSnapshot& snapshot : g_snapshots) RestoreSnapshot(snapshot);
+        SyncAllListItems();
+        ClearSnapshots();
+        ReleaseSRWLockExclusive(&g_state_lock);
+        Log("Falha ao ativar os hooks da Cheat Shop.");
         return FALSE;
     }
     g_enabled.store(true, std::memory_order_release);
@@ -499,6 +506,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
     SyncAllListItems();
     ClearSnapshots();
     ReleaseSRWLockExclusive(&g_state_lock);
+    SetHooksEnabled(false);
     return TRUE;
 }
 

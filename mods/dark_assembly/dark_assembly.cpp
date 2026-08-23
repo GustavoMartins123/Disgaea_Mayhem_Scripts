@@ -89,10 +89,7 @@ bool InstallHook() {
     }
     g_minhook_initialized = true;
     if (MH_CreateHook(g_hook_target, reinterpret_cast<LPVOID>(&HookVoteUpdate),
-                      reinterpret_cast<LPVOID*>(&g_original_vote_update)) != MH_OK ||
-        MH_EnableHook(g_hook_target) != MH_OK) {
-        MH_DisableHook(g_hook_target);
-        MH_RemoveHook(g_hook_target);
+                      reinterpret_cast<LPVOID*>(&g_original_vote_update)) != MH_OK) {
         MH_Uninitialize();
         g_minhook_initialized = false;
         g_hook_target = nullptr;
@@ -132,12 +129,18 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostConte
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
     if (!g_minhook_initialized || g_hook_target == nullptr) return FALSE;
+    const MH_STATUS status = MH_EnableHook(g_hook_target);
+    if (status != MH_OK && status != MH_ERROR_ENABLED) {
+        Log("Falha ao ativar o hook de votacao.");
+        return FALSE;
+    }
     g_enabled.store(true, std::memory_order_release);
     return TRUE;
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
     g_enabled.store(false, std::memory_order_release);
+    if (g_minhook_initialized && g_hook_target != nullptr) MH_DisableHook(g_hook_target);
     return TRUE;
 }
 

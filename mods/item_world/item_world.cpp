@@ -183,14 +183,7 @@ bool InstallHooks() {
                       reinterpret_cast<LPVOID*>(&g_original_accumulate_item_points)) != MH_OK ||
         MH_CreateHook(g_generate_rarity_target,
                       reinterpret_cast<LPVOID>(&HookGenerateRarity),
-                      reinterpret_cast<LPVOID*>(&g_original_generate_rarity)) != MH_OK ||
-        MH_QueueEnableHook(g_apply_rewards_target) != MH_OK ||
-        MH_QueueEnableHook(g_accumulate_item_points_target) != MH_OK ||
-        MH_QueueEnableHook(g_generate_rarity_target) != MH_OK ||
-        MH_ApplyQueued() != MH_OK) {
-        MH_DisableHook(g_apply_rewards_target);
-        MH_DisableHook(g_accumulate_item_points_target);
-        MH_DisableHook(g_generate_rarity_target);
+                      reinterpret_cast<LPVOID*>(&g_original_generate_rarity)) != MH_OK) {
         MH_RemoveHook(g_apply_rewards_target);
         MH_RemoveHook(g_accumulate_item_points_target);
         MH_RemoveHook(g_generate_rarity_target);
@@ -205,6 +198,32 @@ bool InstallHooks() {
         return false;
     }
     return true;
+}
+
+// Cada hook segue o toggle do mod E a option correspondente. Só options do tipo
+// toggle entram aqui: uma option de slider dispararia Mod_SetOption a cada frame de
+// arraste, e cada mudanca de estado de hook congela todas as threads do processo.
+bool SyncHookStates() {
+    if (!g_minhook_initialized) return false;
+    const bool mod_enabled = InterlockedCompareExchange(&g_enabled, FALSE, FALSE) != FALSE;
+    const struct {
+        void* target;
+        volatile LONG* option;
+    } gates[] = {
+        {g_apply_rewards_target, &g_level_multiplier_enabled},
+        {g_accumulate_item_points_target, &g_item_point_multiplier_enabled},
+        {g_generate_rarity_target, &g_rarity_enabled},
+    };
+
+    for (const auto& gate : gates) {
+        if (gate.target == nullptr) return false;
+        const bool wanted = mod_enabled &&
+                            InterlockedCompareExchange(gate.option, FALSE, FALSE) != FALSE;
+        const MH_STATUS status = wanted ? MH_QueueEnableHook(gate.target)
+                                        : MH_QueueDisableHook(gate.target);
+        if (status != MH_OK) return false;
+    }
+    return MH_ApplyQueued() == MH_OK;
 }
 
 void RemoveHooks() {
@@ -252,11 +271,18 @@ __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context
 
 __declspec(dllexport) BOOL WINAPI Mod_Enable() {
     InterlockedExchange(&g_enabled, TRUE);
+    if (!SyncHookStates()) {
+        InterlockedExchange(&g_enabled, FALSE);
+        SyncHookStates();
+        Log("Falha ao ativar os hooks do Item World.");
+        return FALSE;
+    }
     return TRUE;
 }
 
 __declspec(dllexport) BOOL WINAPI Mod_Disable() {
     InterlockedExchange(&g_enabled, FALSE);
+    SyncHookStates();
     return TRUE;
 }
 
@@ -268,6 +294,7 @@ __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValu
             (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
         InterlockedExchange(&g_level_multiplier_enabled,
                             value->bool_value != FALSE ? TRUE : FALSE);
+        SyncHookStates();
         return TRUE;
     }
     if (std::strcmp(key, "item_points_enabled") == 0) {
@@ -275,6 +302,7 @@ __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValu
             (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
         InterlockedExchange(&g_item_point_multiplier_enabled,
                             value->bool_value != FALSE ? TRUE : FALSE);
+        SyncHookStates();
         return TRUE;
     }
     if (std::strcmp(key, "rarity_enabled") == 0) {
@@ -282,6 +310,7 @@ __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValu
             (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
         InterlockedExchange(&g_rarity_enabled,
                             value->bool_value != FALSE ? TRUE : FALSE);
+        SyncHookStates();
         return TRUE;
     }
     if (std::strcmp(key, "minimum_rarity") == 0) {

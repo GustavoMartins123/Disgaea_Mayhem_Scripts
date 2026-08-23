@@ -252,14 +252,7 @@ bool InstallHooks() {
                       reinterpret_cast<LPVOID*>(&g_original_information_sync)) != MH_OK ||
         MH_CreateHook(g_param_bonus_hook_target,
                       reinterpret_cast<LPVOID>(&HookParamBonusApply),
-                      reinterpret_cast<LPVOID*>(&g_original_param_bonus_apply)) != MH_OK ||
-        MH_QueueEnableHook(g_turn_hook_target) != MH_OK ||
-        MH_QueueEnableHook(g_information_hook_target) != MH_OK ||
-        MH_QueueEnableHook(g_param_bonus_hook_target) != MH_OK ||
-        MH_ApplyQueued() != MH_OK) {
-        MH_DisableHook(g_turn_hook_target);
-        MH_DisableHook(g_information_hook_target);
-        MH_DisableHook(g_param_bonus_hook_target);
+                      reinterpret_cast<LPVOID*>(&g_original_param_bonus_apply)) != MH_OK) {
         MH_RemoveHook(g_turn_hook_target);
         MH_RemoveHook(g_information_hook_target);
         MH_RemoveHook(g_param_bonus_hook_target);
@@ -276,6 +269,26 @@ bool InstallHooks() {
     }
 
     return true;
+}
+
+// Os hooks de energia seguem o toggle freeze_energy; o de bonus segue so o mod.
+// tile_status_multiplier e slider e por isso nao gatilha hook: Mod_SetOption dispara a
+// cada frame de arraste, e cada mudanca de estado congela todas as threads do processo.
+bool SyncHookStates() {
+    if (!g_minhook_initialized || g_turn_hook_target == nullptr ||
+        g_information_hook_target == nullptr || g_param_bonus_hook_target == nullptr) {
+        return false;
+    }
+    const bool mod_enabled = g_enabled.load(std::memory_order_acquire);
+    const bool freeze = mod_enabled && g_freeze_energy.load(std::memory_order_acquire);
+
+    const auto queue = [](void* target, bool wanted) {
+        return (wanted ? MH_QueueEnableHook(target) : MH_QueueDisableHook(target)) == MH_OK;
+    };
+    return queue(g_turn_hook_target, freeze) &&
+           queue(g_information_hook_target, freeze) &&
+           queue(g_param_bonus_hook_target, mod_enabled) &&
+           MH_ApplyQueued() == MH_OK;
 }
 
 void RemoveHook() {
@@ -318,16 +331,19 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostConte
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
-    if (!g_minhook_initialized || g_turn_hook_target == nullptr ||
-        g_information_hook_target == nullptr || g_param_bonus_hook_target == nullptr) {
+    g_enabled.store(true, std::memory_order_release);
+    if (!SyncHookStates()) {
+        g_enabled.store(false, std::memory_order_release);
+        SyncHookStates();
+        Log("Falha ao ativar os hooks do Chara World.");
         return FALSE;
     }
-    g_enabled.store(true, std::memory_order_release);
     return TRUE;
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
     g_enabled.store(false, std::memory_order_release);
+    SyncHookStates();
     return TRUE;
 }
 
@@ -350,6 +366,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(
     if (std::strcmp(key, "freeze_energy") == 0) {
         if (value->type != DmOptionType::Toggle) return FALSE;
         g_freeze_energy.store(value->bool_value != FALSE, std::memory_order_release);
+        SyncHookStates();
         return TRUE;
     }
 

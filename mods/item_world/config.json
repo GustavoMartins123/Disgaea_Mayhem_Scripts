@@ -3,10 +3,10 @@
   "mod_id": "item_world",
   "options": {
     "level_exp_enabled": true,
-    "level_exp_multiplier": 1,
+    "level_exp_multiplier": 20,
     "item_points_enabled": true,
     "item_point_multiplier": 20,
-    "rarity_enabled": false,
-    "minimum_rarity": 50
+    "rarity_enabled": true,
+    "minimum_rarity": 80
   }
 }
