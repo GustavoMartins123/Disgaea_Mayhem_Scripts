@@ -10,7 +10,7 @@ e usa a identificação interna em RVA `0xA251F0`.
 
 | Posição | Uso confirmado |
 | --- | --- |
-| `+0x18` | contexto que contém o item em `+0x28` |
+| `+0x18` | referência do item da exploração |
 | `+0x38` | lista de ondas da sessão |
 | `+0x48` | resultados acumulados |
 | `+0x68` | pontos usados para aumentar o nível do item |
@@ -19,7 +19,7 @@ e usa a identificação interna em RVA `0xA251F0`.
 | `+0x78` | contador do inimigo `1000300` |
 | `+0x88` | Item Points acumulados |
 | `+0x90` | quantidade máxima de ondas |
-| `+0x94` | identificação da sala atual |
+| `+0x94` | lista de níveis dos bônus da exploração |
 | `+0xB0` | dados da sala atual |
 | `+0xBC` | correção aplicada aos Item Points |
 | `+0xC0` | ondas concluídas |
@@ -64,14 +64,17 @@ Depois disso, o próprio jogo atualiza os atributos do item.
 
 ## Multiplicadores do plugin
 
-O plugin oferece duas opções independentes:
+O plugin oferece dois controles independentes. Cada controle possui uma chave
+para ativar o cálculo e um valor para definir a multiplicação:
 
 | Opção | Onde atua |
 | --- | --- |
+| `level_exp_enabled` | ativa ou desativa a multiplicação do progresso de nível |
 | `level_exp_multiplier` | pontos de nível aplicados pela rotina RVA `0x001D77E0` |
+| `item_points_enabled` | ativa ou desativa a multiplicação de Item Points |
 | `item_point_multiplier` | entradas recebidas pela rotina RVA `0x001D7BD0` |
 
-O valor `1.0` mantém o cálculo original. O plugin não altera os contadores de
+O padrão é `1.0`, que mantém o cálculo original. O plugin não altera os contadores de
 chefes nem o resultado já salvo. Se a versão do executável ou os dados da sessão
 não corresponderem ao esperado, o plugin não aplica a mudança.
 

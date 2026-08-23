@@ -33,8 +33,10 @@ ApplyRewardsFn g_original_apply_rewards = nullptr;
 AccumulateItemPointsFn g_original_accumulate_item_points = nullptr;
 bool g_minhook_initialized = false;
 volatile LONG g_enabled = FALSE;
-volatile LONG g_level_multiplier_scaled = 5000;
-volatile LONG g_item_point_multiplier_scaled = 5000;
+volatile LONG g_level_multiplier_enabled = TRUE;
+volatile LONG g_item_point_multiplier_enabled = TRUE;
+volatile LONG g_level_multiplier_scaled = kMultiplierScale;
+volatile LONG g_item_point_multiplier_scaled = kMultiplierScale;
 volatile LONG g_invalid_object_logged = FALSE;
 std::atomic<LONG> g_active_calls{0};
 std::atomic<bool> g_shutting_down{false};
@@ -118,7 +120,8 @@ std::int64_t ScalePositiveValue(std::int64_t value, LONG multiplier) {
 void HookApplyRewards(void* item_world, void* result_context) {
     HookScope scope;
     if (g_original_apply_rewards == nullptr) return;
-    if (InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE) {
+    if (InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE ||
+        InterlockedCompareExchange(&g_level_multiplier_enabled, FALSE, FALSE) == FALSE) {
         g_original_apply_rewards(item_world, result_context);
         return;
     }
@@ -160,6 +163,7 @@ void HookAccumulateItemPoints(void* item_world, std::int64_t base_points) {
     HookScope scope;
     if (g_original_accumulate_item_points == nullptr) return;
     if (InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE ||
+        InterlockedCompareExchange(&g_item_point_multiplier_enabled, FALSE, FALSE) == FALSE ||
         g_shutting_down.load(std::memory_order_acquire)) {
         g_original_accumulate_item_points(item_world, base_points);
         return;
@@ -288,10 +292,25 @@ __declspec(dllexport) BOOL WINAPI Mod_Disable() {
 
 __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValue* value) {
     if (key == nullptr || value == nullptr || value->struct_size != sizeof(DmModValue)) return FALSE;
-    if (value->type != DmOptionType::SliderFloat || !std::isfinite(value->float_value) ||
-        value->float_value < 1.0F || value->float_value > 100.0F) {
-        return FALSE;
+
+    if (std::strcmp(key, "level_exp_enabled") == 0) {
+        if (value->type != DmOptionType::Toggle ||
+            (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
+        InterlockedExchange(&g_level_multiplier_enabled,
+                            value->bool_value != FALSE ? TRUE : FALSE);
+        return TRUE;
     }
+    if (std::strcmp(key, "item_points_enabled") == 0) {
+        if (value->type != DmOptionType::Toggle ||
+            (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
+        InterlockedExchange(&g_item_point_multiplier_enabled,
+                            value->bool_value != FALSE ? TRUE : FALSE);
+        return TRUE;
+    }
+
+    if (value->type != DmOptionType::SliderFloat || !std::isfinite(value->float_value) ||
+        value->float_value < 1.0F || value->float_value > 20.0F) return FALSE;
+
     const LONG scaled = static_cast<LONG>(std::lround(value->float_value * kMultiplierScale));
     if (std::strcmp(key, "level_exp_multiplier") == 0) {
         InterlockedExchange(&g_level_multiplier_scaled, scaled);

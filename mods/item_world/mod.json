@@ -3,9 +3,9 @@
   "id": "item_world",
   "name": "Item World - Multiplicadores",
   "category": "Item World",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Configura separadamente a progressão de nível e os Item Points obtidos no Item World.",
+  "description": "Controla separadamente o progresso de nível do item e os Item Points obtidos no Item World.",
   "type": "toggle",
   "load_order": 110,
   "plugin": "item_world.dll",
@@ -14,15 +14,25 @@
   ],
   "options": [
     {
+      "id": "level_exp_enabled",
+      "name": "Multiplicar Progresso de Nível",
+      "type": "toggle"
+    },
+    {
       "id": "level_exp_multiplier",
-      "name": "Multiplicador de EXP de Nível",
+      "name": "Progresso de Nível (x)",
       "type": "slider_float",
       "min": 1.0,
       "max": 20.0
     },
     {
+      "id": "item_points_enabled",
+      "name": "Multiplicar Item Points",
+      "type": "toggle"
+    },
+    {
       "id": "item_point_multiplier",
-      "name": "Multiplicador de Item Points",
+      "name": "Item Points (x)",
       "type": "slider_float",
       "min": 1.0,
       "max": 20.0

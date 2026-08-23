@@ -1,18 +1,21 @@
 # Item World - Multiplicadores
 
-Este mod altera dois ganhos do Item World:
+Este mod controla dois ganhos do Item World:
 
-- `level_exp_multiplier`: pontos usados para aumentar o nível do item;
-- `item_point_multiplier`: Item Points recebidos por derrotas e conclusão de ondas.
+- progresso usado para aumentar o nível do item;
+- Item Points recebidos nas batalhas.
 
-O valor `1.0` mantém o cálculo original. Cada opção pode ser configurada entre
-`1.0` e `20.0`.
+Cada ganho possui um controle próprio para ativar ou desativar o multiplicador.
+O valor `1.0` mantém o cálculo normal do jogo. Valores maiores aceleram o ganho e
+podem produzir saltos grandes ao concluir uma exploração.
 
-O jogo continua aplicando seus limites, bônus de chefes e atualização dos
-atributos do item. O mod não altera a chance de drops, a escolha de salas ou os
-Innocents, pois esses caminhos ainda não foram confirmados no executável.
+Todas as alterações são feitas na memória. Desativar o mod ou um de seus
+controles faz as próximas recompensas usarem o cálculo normal.
 
-O plugin é carregado pelo Mod Loader quando `enabled.txt` contém `1`. As opções
-ficam em `config.json` e também podem ser alteradas pelo Mod Menu.
+O mod não altera quantidade ou chance de equipamentos, escolha de salas ou
+Innocents. Essas opções só serão incluídas quando houver uma rotina confirmada
+para cada uma delas.
+
+As opções ficam em `config.json` e também aparecem no Mod Menu.
 
 Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` para os dados confirmados do jogo.

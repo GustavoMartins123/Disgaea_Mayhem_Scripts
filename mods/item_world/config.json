@@ -2,7 +2,9 @@
   "schema_version": 1,
   "mod_id": "item_world",
   "options": {
-    "level_exp_multiplier": 20,
-    "item_point_multiplier": 20
+    "level_exp_enabled": true,
+    "level_exp_multiplier": 1,
+    "item_points_enabled": true,
+    "item_point_multiplier": 1
   }
 }
