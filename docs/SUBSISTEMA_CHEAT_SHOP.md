@@ -63,3 +63,9 @@ sido carregado antes da action.
 Qualquer divergência encerra a action com erro antes de substituir o banco. Não
 há busca por outro arquivo, cópia de backup ou compatibilidade silenciosa com
 outro schema.
+
+## Confirmação no Mod Menu
+
+Depois da execução, o loader mostra quais cinco limites foram confirmados em
+`5000%`. A indicação `[OK]` e essa mensagem vêm somente depois da releitura do
+arquivo e da comparação final.

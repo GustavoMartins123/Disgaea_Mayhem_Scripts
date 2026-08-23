@@ -118,10 +118,12 @@ $cheatShopOutput = Join-Path $buildRoot 'APLICAR_MOD_CHEAT_SHOP.exe'
     (Join-Path $gameRoot 'mods\cheat_shop\apply_cheat_shop.cpp') -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_CHEAT_SHOP.exe' }
 
-$darkAssemblyOutput = Join-Path $buildRoot 'APLICAR_MOD_DARK_ASSEMBLY.exe'
-& $gxx @cppFlags -static -o $darkAssemblyOutput `
-    (Join-Path $gameRoot 'mods\dark_assembly\apply_dark_assembly.cpp') -lkernel32
-if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular APLICAR_MOD_DARK_ASSEMBLY.exe' }
+$darkAssemblyObject = Compile-CppObject `
+    (Join-Path $gameRoot 'mods\dark_assembly\dark_assembly.cpp') $pluginObjectRoot
+$darkAssemblyOutput = Join-Path $buildRoot 'dark_assembly.dll'
+& $gxx -shared -static-libgcc -static-libstdc++ -o $darkAssemblyOutput `
+    $darkAssemblyObject @pluginMinHookObjects -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular dark_assembly.dll' }
 
 $dlcUnlockerOutput = Join-Path $buildRoot 'APLICAR_MOD_DLC.exe'
 & $gxx @cppFlags -static -o $dlcUnlockerOutput `
@@ -137,7 +139,7 @@ $deployments = @(
     @($safeBackupOutput, (Join-Path $target 'mods\safe_backup\safe_backup.dll')),
     @($modMenuInstallerOutput, (Join-Path $target 'mods\mod_menu\INSTALAR_MOD_MENU.exe')),
     @($cheatShopOutput, (Join-Path $target 'mods\cheat_shop\APLICAR_MOD_CHEAT_SHOP.exe')),
-    @($darkAssemblyOutput, (Join-Path $target 'mods\dark_assembly\APLICAR_MOD_DARK_ASSEMBLY.exe')),
+    @($darkAssemblyOutput, (Join-Path $target 'mods\dark_assembly\dark_assembly.dll')),
     @($dlcUnlockerOutput, (Join-Path $target 'mods\dlc_unlocker\APLICAR_MOD_DLC.exe'))
 )
 foreach ($deployment in $deployments) {

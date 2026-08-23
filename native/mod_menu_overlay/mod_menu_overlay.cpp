@@ -853,7 +853,6 @@ bool InitializeRenderer(IDXGISwapChain* swap_chain) {
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableSetMousePos;
     io.ConfigNavCaptureKeyboard = true;
 
@@ -979,10 +978,10 @@ struct ModItem {
     char version[32] = {};
     char author[64] = {};
     char description[512] = {};
-    char action_label[32] = "Apply";
+    char action_label[32] = {};
     ModType type = ModType::Toggle;
-    bool enabled = true;
-    char status[128] = "Pronto";
+    bool enabled = false;
+    char status[192] = {};
     bool action_applied = false;
     std::vector<ModOption> options;
 };
@@ -993,23 +992,39 @@ static bool g_mods_scanned = false;
 
 static const DmModLoaderApi* g_loader_api = nullptr;
 
-void CopyLoaderView(const DmModView& view, ModItem& mod) {
-    std::snprintf(mod.dir_name, sizeof(mod.dir_name), "%s", view.directory);
-    std::snprintf(mod.id, sizeof(mod.id), "%s", view.id);
-    std::snprintf(mod.name, sizeof(mod.name), "%s", view.name);
-    std::snprintf(mod.category, sizeof(mod.category), "%s", view.category);
-    std::snprintf(mod.version, sizeof(mod.version), "%s", view.version);
-    std::snprintf(mod.author, sizeof(mod.author), "%s", view.author);
-    std::snprintf(mod.description, sizeof(mod.description), "%s", view.description);
-    std::snprintf(mod.action_label, sizeof(mod.action_label), "%s", view.action_label);
-    std::snprintf(mod.status, sizeof(mod.status), "%s", view.status);
-    mod.type = view.type == DmModType::Action ? ModType::Action : ModType::Toggle;
-    mod.enabled = view.runtime_enabled != FALSE;
-    mod.action_applied = view.state == DmModState::ActionCompleted;
-    mod.options.clear();
+bool CopyLoaderView(const DmModView& view, ModItem& mod) {
+    if (view.struct_size != sizeof(DmModView) || view.option_count > DM_MAX_MOD_OPTIONS) {
+        return false;
+    }
+
+    ModItem parsed = {};
+    std::snprintf(parsed.dir_name, sizeof(parsed.dir_name), "%s", view.directory);
+    std::snprintf(parsed.id, sizeof(parsed.id), "%s", view.id);
+    std::snprintf(parsed.name, sizeof(parsed.name), "%s", view.name);
+    std::snprintf(parsed.category, sizeof(parsed.category), "%s", view.category);
+    std::snprintf(parsed.version, sizeof(parsed.version), "%s", view.version);
+    std::snprintf(parsed.author, sizeof(parsed.author), "%s", view.author);
+    std::snprintf(parsed.description, sizeof(parsed.description), "%s", view.description);
+    std::snprintf(parsed.action_label, sizeof(parsed.action_label), "%s", view.action_label);
+    std::snprintf(parsed.status, sizeof(parsed.status), "%s", view.status);
+    if (view.type == DmModType::Action) {
+        if (view.action_label[0] == '\0') return false;
+        parsed.type = ModType::Action;
+    } else if (view.type == DmModType::Toggle) {
+        parsed.type = ModType::Toggle;
+    } else {
+        return false;
+    }
+    parsed.enabled = view.runtime_enabled != FALSE;
+    parsed.action_applied = view.state == DmModState::ActionCompleted;
 
     for (std::uint32_t index = 0; index < view.option_count; ++index) {
         const DmModOptionView& source = view.options[index];
+        if (source.struct_size != sizeof(DmModOptionView) ||
+            source.value.struct_size != sizeof(DmModValue) ||
+            source.type != source.value.type) {
+            return false;
+        }
         ModOption option = {};
         std::snprintf(option.id, sizeof(option.id), "%s", source.id);
         std::snprintf(option.name, sizeof(option.name), "%s", source.name);
@@ -1023,19 +1038,25 @@ void CopyLoaderView(const DmModView& view, ModItem& mod) {
             option.float_val = source.value.float_value;
             option.min_float = source.min_float;
             option.max_float = source.max_float;
-        } else {
+        } else if (source.type == DmOptionType::Toggle) {
             option.type = OptionType::Toggle;
             option.bool_val = source.value.bool_value != FALSE;
+        } else {
+            return false;
         }
-        mod.options.push_back(option);
+        parsed.options.push_back(option);
     }
+    mod = std::move(parsed);
+    return true;
 }
 
 void RefreshModFromLoader(ModItem& mod) {
     if (g_loader_api == nullptr || g_loader_api->GetModById == nullptr) return;
     DmModView view = {};
     view.struct_size = sizeof(view);
-    if (g_loader_api->GetModById(mod.id, &view) != FALSE) CopyLoaderView(view, mod);
+    if (g_loader_api->GetModById(mod.id, &view) != FALSE && !CopyLoaderView(view, mod)) {
+        std::snprintf(mod.status, sizeof(mod.status), "ERRO: dados invalidos recebidos do loader.");
+    }
 }
 
 void ExecuteModActionGeneric(ModItem& mod) {
@@ -1090,8 +1111,9 @@ void ScanAndDiscoverMods() {
         view.struct_size = sizeof(view);
         if (g_loader_api->GetMod(index, &view) == FALSE || view.type == DmModType::System) continue;
         ModItem mod = {};
-        CopyLoaderView(view, mod);
-        g_discovered_mods.push_back(std::move(mod));
+        if (CopyLoaderView(view, mod)) {
+            g_discovered_mods.push_back(std::move(mod));
+        }
     }
     g_mods_scanned = true;
     if (g_selected_mod >= static_cast<int>(g_discovered_mods.size())) g_selected_mod = 0;
@@ -1270,30 +1292,6 @@ void ProcessGamepadNavigation(float /*dt*/) {
 void UpdateGamepadIO(float dt) {
     if (!g_overlay_visible) return;
     ProcessGamepadNavigation(dt);
-
-    ImGuiIO& io = ImGui::GetIO();
-    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i) {
-        XINPUT_STATE state = {};
-        if (SafeXInputGetState(i, &state) == ERROR_SUCCESS) {
-            WORD b = state.Gamepad.wButtons;
-            io.AddKeyEvent(ImGuiKey_GamepadDpadUp, (b & XINPUT_GAMEPAD_DPAD_UP) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadDpadDown, (b & XINPUT_GAMEPAD_DPAD_DOWN) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadDpadLeft, (b & XINPUT_GAMEPAD_DPAD_LEFT) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadDpadRight, (b & XINPUT_GAMEPAD_DPAD_RIGHT) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadFaceDown, (b & XINPUT_GAMEPAD_A) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadFaceRight, (b & XINPUT_GAMEPAD_B) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadFaceLeft, (b & XINPUT_GAMEPAD_X) != 0);
-            io.AddKeyEvent(ImGuiKey_GamepadFaceUp, (b & XINPUT_GAMEPAD_Y) != 0);
-
-            SHORT lx = state.Gamepad.sThumbLX;
-            SHORT ly = state.Gamepad.sThumbLY;
-            io.AddKeyEvent(ImGuiKey_GamepadLStickUp, ly > 18000);
-            io.AddKeyEvent(ImGuiKey_GamepadLStickDown, ly < -18000);
-            io.AddKeyEvent(ImGuiKey_GamepadLStickLeft, lx < -18000);
-            io.AddKeyEvent(ImGuiKey_GamepadLStickRight, lx > 18000);
-            break;
-        }
-    }
 }
 
 void BuildOverlay(const ImVec2& display_size) {
@@ -1337,22 +1335,23 @@ void BuildOverlay(const ImVec2& display_size) {
     // Header
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
     ImGui::SetWindowFontScale(ui_scale * 1.20f);
-    ImGui::TextUnformatted("DISGAEA MAYHEM - MOD MANAGER (IN-GAME)");
+    ImGui::TextWrapped("DISGAEA MAYHEM - MOD MANAGER (IN-GAME)");
     ImGui::SetWindowFontScale(ui_scale);
     ImGui::PopStyleColor();
     const char* engine_status = "DirectX 12 Engine: ATIVO";
     const float engine_status_width = ImGui::CalcTextSize(engine_status).x;
-    if (wide_layout) {
-        ImGui::SameLine();
+    if (engine_status_width <= ImGui::GetContentRegionAvail().x) {
         ImGui::SetCursorPosX(std::max(
-            ImGui::GetCursorPosX(), width - engine_status_width - 44.0f * ui_scale));
+            ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - engine_status_width));
     }
-    ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "%s", engine_status);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.85f, 0.4f, 1.0f));
+    ImGui::TextWrapped("%s", engine_status);
+    ImGui::PopStyleColor();
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, 2.0f * ui_scale));
 
-    // Responsive layout: side-by-side on wide viewports and stacked on narrow ones.
-    const float footer_height = wide_layout ? 40.0f * ui_scale : 76.0f * ui_scale;
+    // Layout em colunas quando houver espaco; em telas menores, os paineis ficam empilhados.
+    const float footer_height = 72.0f * ui_scale;
     const float content_height = std::max(
         140.0f * ui_scale, ImGui::GetContentRegionAvail().y - footer_height);
     const float row_height = 32.0f * ui_scale;
@@ -1375,13 +1374,16 @@ void BuildOverlay(const ImVec2& display_size) {
     ImGui::SetWindowFontScale(ui_scale);
     if (is_left_focused) {
         ImGui::PopStyleColor();
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "MODS DESCOBERTOS (%d) [FOCO: LISTA]", static_cast<int>(g_discovered_mods.size()));
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "MODS (%d)", static_cast<int>(g_discovered_mods.size()));
     } else {
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "MODS DESCOBERTOS (%d)", static_cast<int>(g_discovered_mods.size()));
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "MODS (%d)", static_cast<int>(g_discovered_mods.size()));
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Atualizar")) {
         ScanAndDiscoverMods();
+    }
+    if (is_left_focused) {
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Foco: lista");
     }
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -1408,7 +1410,16 @@ void BuildOverlay(const ImVec2& display_size) {
             ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.35f, 0.25f, 0.12f, 0.95f));
         }
 
-        if (ImGui::Selectable(label, is_selected, 0, ImVec2(0, row_height))) {
+        const ImVec2 row_start = ImGui::GetCursorScreenPos();
+        const ImVec2 row_local_start = ImGui::GetCursorPos();
+        const float row_wrap_width = std::max(
+            80.0f * ui_scale, ImGui::GetContentRegionAvail().x - 12.0f * ui_scale);
+        const float label_height = ImGui::CalcTextSize(
+            label, nullptr, false, row_wrap_width).y;
+        const float selectable_height = std::max(
+            row_height, label_height + ImGui::GetStyle().FramePadding.y * 2.0f);
+
+        if (ImGui::Selectable("##mod_row", is_selected, 0, ImVec2(0, selectable_height))) {
             g_selected_mod = static_cast<int>(i);
             g_gp_nav.active_panel = ActiveFocusPanel::LeftList;
         }
@@ -1417,6 +1428,15 @@ void BuildOverlay(const ImVec2& display_size) {
             ImGui::PopStyleColor();
             ImGui::SetItemDefaultFocus();
         }
+
+        const ImVec2 row_end = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(
+            row_start.x + ImGui::GetStyle().FramePadding.x,
+            row_start.y + ImGui::GetStyle().FramePadding.y));
+        ImGui::PushTextWrapPos(row_local_start.x + row_wrap_width);
+        ImGui::TextUnformatted(label);
+        ImGui::PopTextWrapPos();
+        ImGui::SetCursorScreenPos(row_end);
 
         ImGui::PopID();
     }
@@ -1460,11 +1480,17 @@ void BuildOverlay(const ImVec2& display_size) {
         ImGui::SetWindowFontScale(ui_scale);
         ImGui::PopStyleColor();
 
-        ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1.0f), "Categoria: %s", mod.category);
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.65f, 1.0f), "Versao: %s  |  Autor: %s", mod.version, mod.author);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+        ImGui::TextWrapped("Categoria: %s", mod.category);
+        ImGui::PopStyleColor();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.65f, 1.0f));
+        ImGui::TextWrapped("Versao: %s", mod.version);
+        ImGui::TextWrapped("Autor: %s", mod.author);
+        ImGui::PopStyleColor();
         if (is_right_focused) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), " [FOCO: OPCOES - LB/RB para Lista]");
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.3f, 1.0f));
+            ImGui::TextWrapped("Foco: opcoes - LB/RB para voltar a lista");
+            ImGui::PopStyleColor();
         }
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -1490,8 +1516,6 @@ void BuildOverlay(const ImVec2& display_size) {
             } else {
                 ImGui::TextUnformatted("  Controle Principal:");
             }
-            ImGui::SameLine();
-            
             if (mod.enabled) {
                 ImGui::PushStyleColor(ImGuiCol_Button, is_opt0_focused ? ImVec4(0.25f, 0.85f, 0.35f, 1.0f) : ImVec4(0.15f, 0.65f, 0.25f, 0.95f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.75f, 0.3f, 1.0f));
@@ -1525,17 +1549,20 @@ void BuildOverlay(const ImVec2& display_size) {
             } else {
                 ImGui::TextUnformatted("  Acao do Mod:");
             }
-            ImGui::SameLine();
-
             char btn_lbl[64];
-            std::snprintf(btn_lbl, sizeof(btn_lbl), is_opt0_focused ? " > [ %s ] < " : "  [ %s ]  ",
-                mod.action_applied ? "Re-Apply Mod" : (mod.action_label[0] ? mod.action_label : "Apply"));
+            std::snprintf(btn_lbl, sizeof(btn_lbl),
+                is_opt0_focused ? " > [ %s ] < " : "  [ %s ]  ", mod.action_label);
 
             ImGui::PushStyleColor(ImGuiCol_Button, mod.action_applied ? ImVec4(0.18f, 0.45f, 0.25f, 0.95f) : ImVec4(0.72f, 0.25f, 0.15f, 0.95f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.35f, 0.2f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.95f, 0.45f, 0.25f, 1.0f));
 
-            if (ImGui::Button(btn_lbl, ImVec2(180.0f * ui_scale, 34.0f * ui_scale))) {
+            const float action_button_width = std::min(
+                ImGui::GetContentRegionAvail().x,
+                std::max(
+                    180.0f * ui_scale,
+                    ImGui::CalcTextSize(btn_lbl).x + ImGui::GetStyle().FramePadding.x * 2.0f));
+            if (ImGui::Button(btn_lbl, ImVec2(action_button_width, 34.0f * ui_scale))) {
                 ExecuteModActionGeneric(mod);
                 g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                 g_gp_nav.focused_option = 0;
@@ -1562,18 +1589,26 @@ void BuildOverlay(const ImVec2& display_size) {
                 }
 
                 if (opt.type == OptionType::Toggle) {
-                    char chk_lbl[128];
-                    std::snprintf(chk_lbl, sizeof(chk_lbl), "%s%s", is_cur_opt_focused ? "> " : "  ", opt.name);
-                    if (ImGui::Checkbox(chk_lbl, &opt.bool_val)) {
+                    if (ImGui::Checkbox("##toggle", &opt.bool_val)) {
                         NotifyModOptionChanged(mod, opt);
                         g_gp_nav.active_panel = ActiveFocusPanel::RightOptions;
                         g_gp_nav.focused_option = static_cast<int>(j + 1);
                     }
+                    ImGui::SameLine();
+                    if (is_cur_opt_focused) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
+                    }
+                    ImGui::TextWrapped("%s%s", is_cur_opt_focused ? "> " : "", opt.name);
+                    if (is_cur_opt_focused) {
+                        ImGui::PopStyleColor();
+                    }
                 } else if (opt.type == OptionType::SliderInt) {
                     if (is_cur_opt_focused) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ < / > para ajustar ]", opt.name);
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
+                        ImGui::TextWrapped("> %s  [ < / > para ajustar ]", opt.name);
+                        ImGui::PopStyleColor();
                     } else {
-                        ImGui::TextUnformatted(opt.name);
+                        ImGui::TextWrapped("%s", opt.name);
                     }
                     ImGui::PushItemWidth(std::max(
                         150.0f * ui_scale,
@@ -1586,9 +1621,11 @@ void BuildOverlay(const ImVec2& display_size) {
                     ImGui::PopItemWidth();
                 } else if (opt.type == OptionType::SliderFloat) {
                     if (is_cur_opt_focused) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "> %s  [ < / > para ajustar ]", opt.name);
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
+                        ImGui::TextWrapped("> %s  [ < / > para ajustar ]", opt.name);
+                        ImGui::PopStyleColor();
                     } else {
-                        ImGui::TextUnformatted(opt.name);
+                        ImGui::TextWrapped("%s", opt.name);
                     }
                     ImGui::PushItemWidth(std::max(
                         150.0f * ui_scale,
@@ -1613,20 +1650,24 @@ void BuildOverlay(const ImVec2& display_size) {
         ImGui::Separator();
 
         // Status Line
-        ImGui::TextUnformatted("Status:");
-        ImGui::SameLine();
         if (mod.type == ModType::Toggle) {
             if (mod.enabled) {
-                ImGui::TextColored(ImVec4(0.3f, 0.95f, 0.4f, 1.0f), "Ativo [ON] - %s", mod.status);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.95f, 0.4f, 1.0f));
+                ImGui::TextWrapped("Status: Ativo [ON] - %s", mod.status);
+                ImGui::PopStyleColor();
             } else {
-                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Desativado [OFF] - %s", mod.status);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+                ImGui::TextWrapped("Status: Desativado [OFF] - %s", mod.status);
+                ImGui::PopStyleColor();
             }
         } else {
             if (mod.action_applied) {
-                ImGui::TextColored(ImVec4(0.3f, 0.95f, 0.4f, 1.0f), "%s", mod.status);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.95f, 0.4f, 1.0f));
             } else {
-                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "%s", mod.status);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.2f, 1.0f));
             }
+            ImGui::TextWrapped("Status: %s", mod.status);
+            ImGui::PopStyleColor();
         }
     }
     ImGui::EndChild();
@@ -1634,14 +1675,9 @@ void BuildOverlay(const ImVec2& display_size) {
     // Footer
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.74f, 0.20f, 1.0f));
-    if (wide_layout) {
-        ImGui::TextUnformatted(
-            "Abrir: Select / L3+R3 / F1  |  Painel: LB/RB  |  D-Pad: navegar  |  A: confirmar");
-    } else {
-        ImGui::TextWrapped("F1/Insert/Home ou Select/L3+R3: abrir e fechar");
-    }
+    ImGui::TextWrapped(
+        "Abrir: Select / L3+R3 / F1  |  Painel: LB/RB  |  D-Pad: navegar  |  A: confirmar");
     ImGui::PopStyleColor();
-    if (wide_layout) ImGui::SameLine();
     if (ImGui::SmallButton("Voltar ao jogo (B / Esc)")) {
         CloseOverlay();
     }

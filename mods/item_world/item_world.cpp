@@ -289,7 +289,7 @@ __declspec(dllexport) BOOL WINAPI Mod_Disable() {
 __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValue* value) {
     if (key == nullptr || value == nullptr || value->struct_size != sizeof(DmModValue)) return FALSE;
     if (value->type != DmOptionType::SliderFloat || !std::isfinite(value->float_value) ||
-        value->float_value < 1.0F || value->float_value > 20.0F) {
+        value->float_value < 1.0F || value->float_value > 100.0F) {
         return FALSE;
     }
     const LONG scaled = static_cast<LONG>(std::lround(value->float_value * kMultiplierScale));

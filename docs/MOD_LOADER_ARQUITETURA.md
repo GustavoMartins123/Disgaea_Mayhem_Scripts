@@ -66,9 +66,13 @@ A ABI esta em `native/mod_loader/mod_loader_api.h`. Estruturas incluem `struct_s
 
 Cada mod possui somente `mods/<diretorio>/mod.json`, com `schema_version: 1`.
 
+Todos declaram `id`, `name`, `category`, `version`, `author`, `description`,
+`type` e `load_order`. Campo ausente, texto maior que o limite aceito ou ordem
+fora do intervalo encerra a leitura daquele manifesto com erro.
+
 - `toggle`: exige `plugin` e `enabled.txt` contendo exatamente `0` ou `1`.
 - `system`: exige `plugin`, `required` e `enabled.txt=1`.
-- `action`: exige `executable` e `action_label`.
+- `action`: exige `executable`, `action_label`, `success_status` e `auto_apply`.
 
 Nao existe registro agregado, descoberta de qualquer DLL, nome inferido de executavel ou ABI alternativa.
 
@@ -92,11 +96,12 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 ## Estado atual dos mods
 
 - `mod_menu`: system mod ABI v1; nao gerencia DLLs.
-- `chara_world`: corrige a energia ao preparar a sessão e ao resolver ações do tabuleiro; escreve somente no valor atual em `+0x178`.
+- `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
 - `safe_backup`: uma unica worker, evento de parada e backups dentro da pasta do mod.
 - `item_world`: multiplica separadamente os pontos de nível e os Item Points. Os demais resultados continuam sob controle do jogo.
 - `cheat_shop`: action nativa estrita que valida o schema e expande atomicamente os cinco limites de porcentagem para 5000.
-- `dark_assembly` e `dlc_unlocker`: actions nativas com executavel declarado.
+- `dark_assembly`: toggle residente que garante a aprovação em memória e não altera `wish.dat`.
+- `dlc_unlocker`: action nativa com executável e estado final declarados.
 
 Os arquivos `data/script/*.lub` sao artefatos Lua compilados da engine. Nao existem fontes `.lua` de mods neste repositorio e o loader nao anuncia um runtime Lua inexistente.
 

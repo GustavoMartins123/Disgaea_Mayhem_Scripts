@@ -35,6 +35,7 @@ struct ModRecord {
     std::wstring executable_path;
     std::string directory_utf8;
     std::string directory_path_utf8;
+    std::string action_success_status;
     bool auto_apply = false;
     int load_order = 100;
     HMODULE module = nullptr;
@@ -688,11 +689,29 @@ bool ParseManifest(const std::wstring& directory_path, const std::wstring& direc
     CopyText(record.view.directory, record.directory_utf8);
     CopyText(record.view.name, name);
 
-    std::string value;
-    if (GetJsonString(manifest, "category", value)) CopyText(record.view.category, value);
-    if (GetJsonString(manifest, "version", value)) CopyText(record.view.version, value);
-    if (GetJsonString(manifest, "author", value)) CopyText(record.view.author, value);
-    if (GetJsonString(manifest, "description", value)) CopyText(record.view.description, value);
+    std::string category;
+    std::string version;
+    std::string author;
+    std::string description;
+    if (!GetJsonString(manifest, "category", category) || category.empty() ||
+        !GetJsonString(manifest, "version", version) || version.empty() ||
+        !GetJsonString(manifest, "author", author) || author.empty() ||
+        !GetJsonString(manifest, "description", description) || description.empty()) {
+        error = "manifesto exige category, version, author e description explicitos";
+        return false;
+    }
+    if (record.directory_utf8.size() >= sizeof(record.view.directory) ||
+        category.size() >= sizeof(record.view.category) ||
+        version.size() >= sizeof(record.view.version) ||
+        author.size() >= sizeof(record.view.author) ||
+        description.size() >= sizeof(record.view.description)) {
+        error = "metadados do manifesto excedem a ABI";
+        return false;
+    }
+    CopyText(record.view.category, category);
+    CopyText(record.view.version, version);
+    CopyText(record.view.author, author);
+    CopyText(record.view.description, description);
 
     bool enabled = false;
     if (type == "toggle") {
@@ -735,10 +754,14 @@ bool ParseManifest(const std::wstring& directory_path, const std::wstring& direc
     } else {
         std::string executable;
         std::string action_label;
+        std::string success_status;
         if (!GetJsonString(manifest, "executable", executable) || !IsPlainFileName(executable) ||
             !HasExtension(executable, ".exe") ||
-            !GetJsonString(manifest, "action_label", action_label) || action_label.empty()) {
-            error = "action exige executable e action_label explicitos";
+            !GetJsonString(manifest, "action_label", action_label) || action_label.empty() ||
+            action_label.size() >= sizeof(record.view.action_label) ||
+            !GetJsonString(manifest, "success_status", success_status) ||
+            success_status.empty() || success_status.size() >= sizeof(record.view.status)) {
+            error = "action exige executable, action_label e success_status explicitos";
             return false;
         }
         record.executable_path = directory_path + L"\\" + Utf8ToWide(executable);
@@ -747,13 +770,22 @@ bool ParseManifest(const std::wstring& directory_path, const std::wstring& direc
             return false;
         }
         CopyText(record.view.action_label, action_label);
+        record.action_success_status = success_status;
         bool auto_apply = false;
-        if (GetJsonBool(manifest, "auto_apply", auto_apply)) record.auto_apply = auto_apply;
+        if (!GetJsonBool(manifest, "auto_apply", auto_apply)) {
+            error = "action exige auto_apply booleano explicito";
+            return false;
+        }
+        record.auto_apply = auto_apply;
     }
 
-    int load_order = record.view.type == DmModType::System ? 0 : 100;
-    if (GetJsonInt(manifest, "load_order", load_order)) record.load_order = load_order;
-    else record.load_order = load_order;
+    int load_order = 0;
+    if (!GetJsonInt(manifest, "load_order", load_order) ||
+        load_order < 0 || load_order > 100000) {
+        error = "manifesto exige load_order entre 0 e 100000";
+        return false;
+    }
+    record.load_order = load_order;
 
     if (!ParseOptions(manifest, record, error)) return false;
     if (record.view.type == DmModType::Action && record.view.option_count != 0) {
@@ -926,7 +958,8 @@ bool StartAction(ModRecord& record) {
         SetRecordStatus(record, DmModState::Failed, "Action terminou com codigo %lu.", exit_code);
         return false;
     }
-    SetRecordStatus(record, DmModState::ActionCompleted, "Action concluida com sucesso.");
+    SetRecordStatus(record, DmModState::ActionCompleted, "%s",
+                    record.action_success_status.c_str());
     LogLine(record.view.id, "action concluida: %s", WideToUtf8(record.executable_path).c_str());
     return true;
 }

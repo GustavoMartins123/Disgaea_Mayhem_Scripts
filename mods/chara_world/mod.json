@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "id": "chara_world",
-  "name": "Chara World - Energia Infinita",
+  "name": "Chara World - Energia e Bônus",
   "category": "Chara World",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Mantém a energia do Chara World no valor configurado ao entrar e durante o tabuleiro.",
+  "description": "Mantém a energia configurada e multiplica os atributos ganhos nos tiles do Chara World.",
   "type": "toggle",
   "load_order": 100,
   "plugin": "chara_world.dll",
@@ -24,6 +24,13 @@
       "id": "freeze_energy",
       "name": "Congelar Energia Automaticamente",
       "type": "toggle"
+    },
+    {
+      "id": "tile_status_multiplier",
+      "name": "Multiplicador dos Atributos Ganhos nos Tiles",
+      "type": "slider_float",
+      "min": 1.0,
+      "max": 20.0
     }
   ]
 }

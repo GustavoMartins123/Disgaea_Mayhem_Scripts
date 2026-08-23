@@ -1,7 +1,7 @@
 # Subsistema: Chara World
 
-Este documento registra os dados confirmados da energia do Chara World na versão
-atual de `Disgaea_Mayhem.exe`.
+Este documento registra os dados confirmados da energia e dos bônus do Chara
+World na versão atual de `Disgaea_Mayhem.exe`.
 
 ## Energia da sessão
 
@@ -13,6 +13,7 @@ relevantes são:
 | `+0x170` | início do controle interno de energia |
 | `+0x174` | parte de um ponteiro interno; não pode receber valores |
 | `+0x178` | energia atual |
+| `+0x180` | objeto com os bônus obtidos na sessão |
 
 O limite normal é `100`. O jogo consulta esse limite em `0x1401A0120`.
 
@@ -33,6 +34,23 @@ alguma verificação falhar, o plugin não é ativado.
 
 Não há leitura periódica nem armazenamento do endereço da sessão. O endereço é
 obtido somente durante uma chamada do próprio jogo.
+
+## Atributos ganhos nos tiles
+
+A rotina na RVA `0x00458930` soma o prêmio do tile ao quadro de bônus. O tipo e
+o valor vêm do efeito atual da sessão.
+
+| Tipo | Atributo | Campo em `CCharacterWorldBonus` |
+| ---: | --- | --- |
+| `0` | HP | `+0x18` |
+| `1` | ATK | `+0x28` |
+| `2` | DEF | `+0x38` |
+| `3` | MOVE | `+0x48` |
+| `4` | CRITICAL | `+0x58` |
+
+O plugin multiplica somente o valor positivo recebido nessa rotina. O valor
+temporário do efeito é restaurado depois da soma, evitando que o mesmo ganho
+seja multiplicado novamente.
 
 ## Causa do crash anterior
 

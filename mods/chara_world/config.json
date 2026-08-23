@@ -3,6 +3,7 @@
   "mod_id": "chara_world",
   "options": {
     "locked_energy": 100,
-    "freeze_energy": true
+    "freeze_energy": true,
+    "tile_status_multiplier": 1.0
   }
 }

@@ -12,6 +12,8 @@
    pontos de hook do Chara World.
 4. [SUBSISTEMA_CHEAT_SHOP.md](SUBSISTEMA_CHEAT_SHOP.md): schema do banco,
    offsets dos limites e patch transacional do Cheat Shop.
+5. [SUBSISTEMA_DARK_ASSEMBLY.md](SUBSISTEMA_DARK_ASSEMBLY.md): decisão das
+   votações e aprovação temporária em memória.
 
 ## VTables e classes RTTI catalogadas
 
@@ -23,12 +25,14 @@
 | `CTask_Explore_ItemWorldClear` | `0x140A4E320` | `0xA4E320` | `0xCE4610` | Conclusão da exploração |
 | `CState_Main@CTask_Explore_ItemWorldClear` | `0x140A4E1D0` | `0xA4E1D0` | `0xCE44E0` | Distribuição das recompensas |
 | `CState_Item@CTask_Explore_ItemWorldClear` | `0x140A4DFA0` | `0xA4DFA0` | `0xCE4260` | Comparação do item antes/depois |
-| `CCharacterWorldInformation` | `0x140A57610` | `0xA57610` | `0xCED6B0` | Gerenciador do Chara World |
-| `CCharacterWorldBonus` | `0x140A57620` | `0xA57620` | `0xCED720` | Bônus do Chara World |
+| `CCharacterWorldInformation` | `0x140A57610` | `0xA57610` | `0xCE45F8` | Gerenciador do Chara World |
+| `CCharacterWorldBonus` | `0x140A57620` | `0xA57620` | `0xCE43A8` | Bônus do Chara World |
 | `CUIUnion_CharacterWorld_Energy` | `0x140A71728` | `0xA71728` | `0xCFA260` | UI de energia |
 | `CUIUnion_CharacterWorldBattle_Energy` | `0x140A710F8` | `0xA710F8` | `0xCF94F8` | UI de energia em batalha |
 | `CTask_CharacterWorldGame_Move` | `0x140A53D88` | `0xA53D88` | `0xCE1FB0` | Movimento no Chara World |
 | `CTask_CharacterWorldGame_TurnStart` | `0x140A52E18` | `0xA52E18` | `0xCE0780` | Início de turno no Chara World |
+| `CTask_Vote_Voting` | `0x140A59960` | `0xA59960` | `0xCE7EB8` | Dados e resultado da votação |
+| `CState_Vote@CTask_Vote_Voting` | `0x140A59850` | `0xA59850` | `0xCE7D58` | Estado da votação |
 
 ## Resumo do Item World
 
@@ -49,6 +53,9 @@ incorreta.
 
 - `CCharacterWorldInformation + 0x174`: parte de um ponteiro interno; não é energia.
 - `CCharacterWorldInformation + 0x178`: energia atual da lógica.
+- `CCharacterWorldInformation + 0x180`: objeto `CCharacterWorldBonus`.
+- `CCharacterWorldBonus + 0x18/+0x28/+0x38`: HP, ATK e DEF ganhos.
+- `CCharacterWorldBonus + 0x48/+0x58`: MOVE e CRITICAL ganhos.
 - `CUIUnion_CharacterWorld_Energy + 0x70`: energia exibida.
 - `CUIUnion_CharacterWorld_Energy + 0x78`: barra de progresso.
 - `CUIUnion_CharacterWorld_Energy + 0x7C`: valor alvo da transição.

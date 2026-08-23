@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
   "id": "dark_assembly_approval",
-  "name": "Dark Assembly - Aprovação 100% dos Senadores",
+  "name": "Dark Assembly - Aprovação Garantida",
   "category": "Qualidade de Vida (QoL)",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Aplica a tabela modificada da Dark Assembly para propostas, desejos e leis com aprovação garantida.",
-  "type": "action",
-  "auto_apply": true,
-  "action_label": "Re-Apply",
-  "executable": "APLICAR_MOD_DARK_ASSEMBLY.exe",
-  "components": "wish.dat + aplicador nativo auto-contido"
+  "description": "Garante a aprovação das propostas enquanto estiver ativo, sem modificar o banco local.",
+  "type": "toggle",
+  "load_order": 120,
+  "plugin": "dark_assembly.dll",
+  "components": [
+    "mods/dark_assembly/dark_assembly.dll"
+  ]
 }
