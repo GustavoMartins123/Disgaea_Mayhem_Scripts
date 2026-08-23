@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "mod_id": "item_world",
+  "options": {
+    "levels_per_floor": 5,
+    "auto_subdue": true,
+    "mystery_room_rate": 75
+  }
+}

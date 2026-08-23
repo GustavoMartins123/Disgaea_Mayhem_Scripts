@@ -13,4 +13,6 @@ Plugin nativo ABI v1 que mantem a energia do Chara World no valor configurado.
 
 O plugin e carregado automaticamente pelo `dxgi.dll` quando `enabled.txt` contem `1`. Nao ha injecao manual nem segundo gerenciador de estado.
 
+Os tipos e limites das opcoes ficam em `mod.json`; `locked_energy` e `freeze_energy` sao lidos e persistidos exclusivamente em `config.json`.
+
 Consulte `docs/SUBSISTEMA_CHARA_WORLD.md` e `docs/MOD_LOADER_ARQUITETURA.md`.

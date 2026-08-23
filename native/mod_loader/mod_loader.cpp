@@ -7,11 +7,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <limits>
+#include <locale>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -244,6 +249,43 @@ bool FindObjectMember(const std::string& json, const std::string& key, JsonSpan&
     return false;
 }
 
+bool ParseObjectMembers(const std::string& json,
+                        std::vector<std::pair<std::string, JsonSpan>>& members) {
+    std::size_t position = 0;
+    SkipWhitespace(json, position);
+    if (position >= json.size() || json[position++] != '{') return false;
+    SkipWhitespace(json, position);
+    if (position < json.size() && json[position] == '}') {
+        ++position;
+        SkipWhitespace(json, position);
+        return position == json.size();
+    }
+
+    while (position < json.size()) {
+        std::string name;
+        if (!ParseStringToken(json, position, &name)) return false;
+        SkipWhitespace(json, position);
+        if (position >= json.size() || json[position++] != ':') return false;
+        SkipWhitespace(json, position);
+        JsonSpan span = {position, position};
+        if (!SkipJsonValue(json, position)) return false;
+        span.end = position;
+        members.emplace_back(std::move(name), span);
+        SkipWhitespace(json, position);
+        if (position < json.size() && json[position] == ',') {
+            ++position;
+            continue;
+        }
+        if (position < json.size() && json[position] == '}') {
+            ++position;
+            SkipWhitespace(json, position);
+            return position == json.size();
+        }
+        return false;
+    }
+    return false;
+}
+
 bool GetJsonString(const std::string& json, const char* key, std::string& value) {
     JsonSpan span;
     if (!FindObjectMember(json, key, span)) return false;
@@ -272,7 +314,7 @@ bool GetJsonInt(const std::string& json, const char* key, int& value) {
     const std::string token = json.substr(span.begin, span.end - span.begin);
     char* end = nullptr;
     const long parsed = std::strtol(token.c_str(), &end, 10);
-    if (end == token.c_str() || *end != '\0') return false;
+    if (end == token.c_str() || *end != '\0' || parsed < INT_MIN || parsed > INT_MAX) return false;
     value = static_cast<int>(parsed);
     return true;
 }
@@ -283,7 +325,7 @@ bool GetJsonFloat(const std::string& json, const char* key, float& value) {
     const std::string token = json.substr(span.begin, span.end - span.begin);
     char* end = nullptr;
     const float parsed = std::strtof(token.c_str(), &end);
-    if (end == token.c_str() || *end != '\0') return false;
+    if (end == token.c_str() || *end != '\0' || !std::isfinite(parsed)) return false;
     value = parsed;
     return true;
 }
@@ -311,6 +353,13 @@ bool IsPlainFileName(const std::string& name) {
     return !name.empty() && name != "." && name != ".." &&
            name.find('/') == std::string::npos && name.find('\\') == std::string::npos &&
            name.find(':') == std::string::npos;
+}
+
+bool IsStableIdentifier(const std::string& value) {
+    if (value.empty()) return false;
+    return std::all_of(value.begin(), value.end(), [](unsigned char character) {
+        return std::isalnum(character) != 0 || character == '_' || character == '-';
+    });
 }
 
 bool HasExtension(const std::string& name, const char* extension) {
@@ -345,8 +394,9 @@ bool PersistEnabledFlag(const ModRecord& record, bool enabled) {
     const std::wstring temporary = record.directory_path + L"\\enabled.txt.tmp";
     FILE* file = _wfopen(temporary.c_str(), L"wb");
     if (file == nullptr) return false;
-    const bool written = std::fputc(enabled ? '1' : '0', file) != EOF &&
-                         std::fflush(file) == 0 && std::fclose(file) == 0;
+    bool written = std::fputc(enabled ? '1' : '0', file) != EOF;
+    if (std::fflush(file) != 0) written = false;
+    if (std::fclose(file) != 0) written = false;
     if (!written) {
         DeleteFileW(temporary.c_str());
         return false;
@@ -385,7 +435,7 @@ bool ParseOptions(const std::string& manifest, ModRecord& record, std::string& e
         std::string name;
         std::string type;
         if (!GetJsonString(option_json, "id", id) || !GetJsonString(option_json, "name", name) ||
-            !GetJsonString(option_json, "type", type) || id.empty() || name.empty()) {
+            !GetJsonString(option_json, "type", type) || !IsStableIdentifier(id) || name.empty()) {
             error = "option exige id, name e type";
             return false;
         }
@@ -408,40 +458,30 @@ bool ParseOptions(const std::string& manifest, ModRecord& record, std::string& e
         CopyText(option.name, name);
 
         if (type == "toggle") {
-            bool value = false;
-            if (!GetJsonBool(option_json, "value", value)) {
-                error = "option toggle exige value booleano";
-                return false;
-            }
             option.type = DmOptionType::Toggle;
             option.value.type = option.type;
-            option.value.bool_value = value ? TRUE : FALSE;
         } else if (type == "slider_int") {
             int minimum = 0;
             int maximum = 0;
-            int value = 0;
             if (!GetJsonInt(option_json, "min", minimum) || !GetJsonInt(option_json, "max", maximum) ||
-                !GetJsonInt(option_json, "value", value) || minimum > maximum || value < minimum || value > maximum) {
-                error = "option slider_int exige min/max/value coerentes";
+                minimum > maximum) {
+                error = "option slider_int exige min/max coerentes";
                 return false;
             }
             option.type = DmOptionType::SliderInt;
             option.value.type = option.type;
-            option.value.int_value = value;
             option.min_int = minimum;
             option.max_int = maximum;
         } else if (type == "slider_float") {
             float minimum = 0.0f;
             float maximum = 0.0f;
-            float value = 0.0f;
             if (!GetJsonFloat(option_json, "min", minimum) || !GetJsonFloat(option_json, "max", maximum) ||
-                !GetJsonFloat(option_json, "value", value) || minimum > maximum || value < minimum || value > maximum) {
-                error = "option slider_float exige min/max/value coerentes";
+                minimum > maximum) {
+                error = "option slider_float exige min/max coerentes";
                 return false;
             }
             option.type = DmOptionType::SliderFloat;
             option.value.type = option.type;
-            option.value.float_value = value;
             option.min_float = minimum;
             option.max_float = maximum;
         } else {
@@ -457,6 +497,151 @@ bool ParseOptions(const std::string& manifest, ModRecord& record, std::string& e
         }
         if (position < array.size() && array[position] == ']') break;
         error = "separador invalido em options";
+        return false;
+    }
+    return true;
+}
+
+bool ParseConfig(ModRecord& record, std::string& error) {
+    const std::wstring config_path = record.directory_path + L"\\config.json";
+    std::string config;
+    if (!ReadTextFile(config_path, config)) {
+        error = "config.json ausente ou ilegivel";
+        return false;
+    }
+
+    std::vector<std::pair<std::string, JsonSpan>> root_members;
+    if (!ParseObjectMembers(config, root_members)) {
+        error = "config.json nao e um objeto JSON valido";
+        return false;
+    }
+    bool saw_schema = false;
+    bool saw_mod_id = false;
+    bool saw_options = false;
+    for (const auto& member : root_members) {
+        bool* seen = nullptr;
+        if (member.first == "schema_version") seen = &saw_schema;
+        else if (member.first == "mod_id") seen = &saw_mod_id;
+        else if (member.first == "options") seen = &saw_options;
+        else {
+            error = "campo desconhecido em config.json: " + member.first;
+            return false;
+        }
+        if (*seen) {
+            error = "campo duplicado em config.json: " + member.first;
+            return false;
+        }
+        *seen = true;
+    }
+    int schema_version = 0;
+    std::string mod_id;
+    JsonSpan options_span;
+    if (!saw_schema || !saw_mod_id || !saw_options ||
+        !GetJsonInt(config, "schema_version", schema_version) || schema_version != 1 ||
+        !GetJsonString(config, "mod_id", mod_id) || mod_id != record.view.id ||
+        !FindObjectMember(config, "options", options_span)) {
+        error = "config.json exige schema_version=1, mod_id exato e options";
+        return false;
+    }
+
+    const std::string options_json = config.substr(options_span.begin, options_span.end - options_span.begin);
+    std::vector<std::pair<std::string, JsonSpan>> option_members;
+    if (!ParseObjectMembers(options_json, option_members)) {
+        error = "options de config.json deve ser um objeto valido";
+        return false;
+    }
+    bool populated[DM_MAX_MOD_OPTIONS] = {};
+    for (const auto& member : option_members) {
+        DmModOptionView* selected = nullptr;
+        std::uint32_t selected_index = 0;
+        for (std::uint32_t index = 0; index < record.view.option_count; ++index) {
+            if (member.first == record.view.options[index].id) {
+                selected = &record.view.options[index];
+                selected_index = index;
+                break;
+            }
+        }
+        if (selected == nullptr) {
+            error = "option desconhecida em config.json: " + member.first;
+            return false;
+        }
+        if (populated[selected_index]) {
+            error = "option duplicada em config.json: " + member.first;
+            return false;
+        }
+        populated[selected_index] = true;
+        const std::string token = options_json.substr(member.second.begin, member.second.end - member.second.begin);
+        if (selected->type == DmOptionType::Toggle) {
+            if (token == "true") selected->value.bool_value = TRUE;
+            else if (token == "false") selected->value.bool_value = FALSE;
+            else {
+                error = "option toggle exige booleano em config.json: " + member.first;
+                return false;
+            }
+        } else if (selected->type == DmOptionType::SliderInt) {
+            char* end = nullptr;
+            const long parsed = std::strtol(token.c_str(), &end, 10);
+            if (end == token.c_str() || *end != '\0' || parsed < selected->min_int || parsed > selected->max_int) {
+                error = "option inteira fora do intervalo em config.json: " + member.first;
+                return false;
+            }
+            selected->value.int_value = static_cast<int>(parsed);
+        } else if (selected->type == DmOptionType::SliderFloat) {
+            char* end = nullptr;
+            const float parsed = std::strtof(token.c_str(), &end);
+            if (end == token.c_str() || *end != '\0' || !std::isfinite(parsed) ||
+                parsed < selected->min_float || parsed > selected->max_float) {
+                error = "option decimal fora do intervalo em config.json: " + member.first;
+                return false;
+            }
+            selected->value.float_value = parsed;
+        }
+    }
+    for (std::uint32_t index = 0; index < record.view.option_count; ++index) {
+        if (!populated[index]) {
+            error = "option ausente em config.json: " + std::string(record.view.options[index].id);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PersistConfig(const ModRecord& record) {
+    DmModView view = {};
+    AcquireSRWLockShared(&g_records_lock);
+    view = record.view;
+    ReleaseSRWLockShared(&g_records_lock);
+
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output.precision(std::numeric_limits<float>::max_digits10);
+    output << "{\n  \"schema_version\": 1,\n  \"mod_id\": \"" << view.id << "\",\n  \"options\": {";
+    for (std::uint32_t index = 0; index < view.option_count; ++index) {
+        const DmModOptionView& option = view.options[index];
+        output << (index == 0 ? "\n" : ",\n") << "    \"" << option.id << "\": ";
+        if (option.type == DmOptionType::Toggle) output << (option.value.bool_value != FALSE ? "true" : "false");
+        else if (option.type == DmOptionType::SliderInt) output << option.value.int_value;
+        else if (option.type == DmOptionType::SliderFloat) output << option.value.float_value;
+        else return false;
+    }
+    if (view.option_count != 0) output << '\n';
+    output << "  }\n}\n";
+    if (!output.good()) return false;
+    const std::string content = output.str();
+
+    const std::wstring target = record.directory_path + L"\\config.json";
+    const std::wstring temporary = record.directory_path + L"\\config.json.tmp";
+    FILE* file = _wfopen(temporary.c_str(), L"wb");
+    if (file == nullptr) return false;
+    bool written = std::fwrite(content.data(), 1, content.size(), file) == content.size();
+    if (std::fflush(file) != 0) written = false;
+    if (std::fclose(file) != 0) written = false;
+    if (!written) {
+        DeleteFileW(temporary.c_str());
+        return false;
+    }
+    if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(temporary.c_str());
         return false;
     }
     return true;
@@ -481,7 +666,7 @@ bool ParseManifest(const std::wstring& directory_path, const std::wstring& direc
         error = "manifesto exige schema_version=1, id, name e type";
         return false;
     }
-    if (!IsPlainFileName(id)) {
+    if (!IsStableIdentifier(id)) {
         error = "id invalido";
         return false;
     }
@@ -571,6 +756,11 @@ bool ParseManifest(const std::wstring& directory_path, const std::wstring& direc
     else record.load_order = load_order;
 
     if (!ParseOptions(manifest, record, error)) return false;
+    if (record.view.type == DmModType::Action && record.view.option_count != 0) {
+        error = "action nao aceita options persistentes";
+        return false;
+    }
+    if (record.view.type != DmModType::Action && !ParseConfig(record, error)) return false;
     std::snprintf(record.view.status, sizeof(record.view.status), "Descoberto; aguardando inicializacao.");
     return true;
 }
@@ -824,17 +1014,34 @@ BOOL WINAPI ApiSetModOption(const char* mod_id, const char* option_id, const DmM
         }
     }
     if (selected == nullptr || selected->type != value->type) return FALSE;
+    if (value->type == DmOptionType::Toggle && value->bool_value != FALSE && value->bool_value != TRUE) return FALSE;
     if (value->type == DmOptionType::SliderInt &&
         (value->int_value < selected->min_int || value->int_value > selected->max_int)) return FALSE;
     if (value->type == DmOptionType::SliderFloat &&
-        (value->float_value < selected->min_float || value->float_value > selected->max_float)) return FALSE;
-    if (record->module != nullptr && (record->set_option == nullptr || record->set_option(option_id, value) == FALSE)) {
+        (!std::isfinite(value->float_value) || value->float_value < selected->min_float ||
+         value->float_value > selected->max_float)) return FALSE;
+
+    const DmModValue previous = selected->value;
+    const bool plugin_received_value = record->module != nullptr;
+    if (plugin_received_value && (record->set_option == nullptr || record->set_option(option_id, value) == FALSE)) {
         SetRecordStatus(*record, DmModState::Failed, "Plugin rejeitou a opcao '%s'.", option_id);
         return FALSE;
     }
     AcquireSRWLockExclusive(&g_records_lock);
     selected->value = *value;
     ReleaseSRWLockExclusive(&g_records_lock);
+    if (!PersistConfig(*record)) {
+        bool rollback_ok = true;
+        if (plugin_received_value) rollback_ok = record->set_option(option_id, &previous) != FALSE;
+        AcquireSRWLockExclusive(&g_records_lock);
+        selected->value = previous;
+        ReleaseSRWLockExclusive(&g_records_lock);
+        if (!rollback_ok && record->view.runtime_enabled != FALSE) DisablePlugin(*record);
+        SetRecordStatus(*record, DmModState::Failed,
+                        rollback_ok ? "Falha ao persistir config.json; valor revertido."
+                                    : "Falha ao persistir config.json e ao reverter plugin; mod desativado.");
+        return FALSE;
+    }
     return TRUE;
 }
 

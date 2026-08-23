@@ -158,6 +158,8 @@ Copy-Item -LiteralPath (Join-Path $gameRoot 'mods\mod_menu\mod.json') `
     -Destination (Join-Path $smokeRoot 'mods\mod_menu\mod.json') -Force
 Copy-Item -LiteralPath (Join-Path $gameRoot 'mods\mod_menu\enabled.txt') `
     -Destination (Join-Path $smokeRoot 'mods\mod_menu\enabled.txt') -Force
+Copy-Item -LiteralPath (Join-Path $gameRoot 'mods\mod_menu\config.json') `
+    -Destination (Join-Path $smokeRoot 'mods\mod_menu\config.json') -Force
 & $smokeOutput
 if ($LASTEXITCODE -ne 0) { throw "Smoke test do proxy/loader falhou com codigo $LASTEXITCODE" }
 $smokeLog = Get-Content -Raw (Join-Path $smokeRoot 'mods\mod_loader.log')

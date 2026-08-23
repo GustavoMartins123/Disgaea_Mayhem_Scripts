@@ -1,11 +1,15 @@
-# 🛡️ Guardião de Backup Seguro (Disgaea Mayhem)
+# Guardiao de Backup Seguro
 
-Monitor nativo em C++ que realiza backups rotativos e versionados dos arquivos de save (`save.*`, `.systemsave`, `save.lst`) para proteger contra congelamentos e bugs de concorrência do auto-save.
+Plugin nativo ABI v1 que cria backups rotativos dos saves em `mods/safe_backup/backups/`.
 
----
+## Ciclo de vida
 
-## 🚀 Como Usar
+- `Mod_Initialize`: valida a ABI e os caminhos fornecidos pelo loader.
+- `Mod_Enable`: inicia uma unica worker de monitoramento.
+- `Mod_Disable`: sinaliza a parada e aguarda a worker terminar.
+- `Mod_Shutdown`: garante o encerramento do plugin.
+- `DllMain`: passivo.
 
-1. **Ativação pelo Mod Menu:** Basta manter ativado `[ ON ]`.
-2. **Execução Manual (1 clique):** Dê um duplo-clique em `APLICAR_SAFE_BACKUP.bat` para gerar um snapshot imediato.
-3. **Pasta de Backups:** Ficam salvos e organizados por timestamp em `mods/safe_backup/backups/`.
+O estado de ativacao fica exclusivamente em `enabled.txt`. O `config.json` e obrigatorio para o plugin residente e possui `options` vazio enquanto nao houver configuracoes expostas pela ABI.
+
+Nao existe aplicador ou modo de execucao manual alternativo.

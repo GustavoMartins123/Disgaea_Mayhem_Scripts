@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "mod_id": "chara_world",
+  "options": {
+    "locked_energy": 100,
+    "freeze_energy": true
+  }
+}

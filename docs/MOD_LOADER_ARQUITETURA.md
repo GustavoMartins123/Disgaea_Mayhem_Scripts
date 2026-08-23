@@ -38,7 +38,7 @@ Disgaea_Mayhem.exe
 2. O proxy resolve `%SystemRoot%/System32/dxgi.dll` e inicia uma unica worker por `InitOnceExecuteOnce`.
 3. A worker resolve a pasta do jogo por `GetModuleFileNameW(nullptr, ...)`.
 4. Cada subpasta com `mod.json` e validada. Pastas sem manifesto sao ignoradas.
-5. IDs duplicados, caminhos com separadores, arquivo ausente, schema ou tipo desconhecido sao rejeitados.
+5. IDs duplicados, caminhos com separadores, arquivo ausente, schema, configuracao ou tipo desconhecido sao rejeitados.
 6. O system mod obrigatorio e carregado primeiro. Se falhar, o bootstrap termina fail-closed.
 7. Toggles com `enabled.txt=1` sao inicializados pela ABI v1 e permanecem residentes.
 8. Actions usam somente o campo `executable`.
@@ -71,6 +71,23 @@ Cada mod possui somente `mods/<diretorio>/mod.json`, com `schema_version: 1`.
 - `action`: exige `executable` e `action_label`.
 
 Nao existe registro agregado, descoberta de qualquer DLL, nome inferido de executavel ou ABI alternativa.
+
+## Configuracao persistente
+
+`mod.json` descreve opcoes imutaveis: `id`, nome, tipo e limites. Os valores nao ficam no manifesto. Todo plugin `toggle` ou `system` exige `mods/<id>/config.json` com esta estrutura:
+
+```json
+{
+  "schema_version": 1,
+  "mod_id": "exemplo",
+  "options": {
+    "opcao_inteira": 100,
+    "opcao_toggle": true
+  }
+}
+```
+
+O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar, sobrar ou aparecer duplicada. Tipos, intervalos e numeros finitos sao validados antes de carregar a DLL. Em runtime, a configuracao validada fica em RAM. Alteracoes sao persistidas por `config.json.tmp` e `MoveFileExW`; se a gravacao falhar, o valor anterior e reaplicado ao plugin. Se o rollback tambem falhar, o mod e desativado e marcado como falho.
 
 ## Estado atual dos mods
 

@@ -17,18 +17,22 @@ Python nao faz parte do runtime nem do fluxo de build deste projeto.
 |-- mods/
 |   |-- mod_menu/
 |   |   |-- mod.json
+|   |   |-- config.json
 |   |   |-- enabled.txt
 |   |   `-- mod_menu.dll             # system mod de UI
 |   |-- chara_world/
 |   |   |-- mod.json
+|   |   |-- config.json
 |   |   |-- enabled.txt
 |   |   `-- chara_world.dll
 |   |-- item_world/
 |   |   |-- mod.json
+|   |   |-- config.json
 |   |   |-- enabled.txt
 |   |   `-- item_world.dll
 |   `-- safe_backup/
 |       |-- mod.json
+|       |-- config.json
 |       |-- enabled.txt
 |       `-- safe_backup.dll
 `-- native/
@@ -37,6 +41,8 @@ Python nao faz parte do runtime nem do fluxo de build deste projeto.
 ```
 
 Nao existe `mods/registry.json` nem uma DLL agregada em `mods/native`. Cada pasta com `mod.json` e a unidade canonica de descoberta.
+
+Todo plugin `toggle` ou `system` exige `config.json` com `schema_version`, `mod_id` exato e todas as opcoes declaradas no manifesto. Campo ausente, extra, duplicado, tipo incorreto ou valor fora do intervalo rejeita o mod. Alteracoes sao gravadas atomicamente antes de serem confirmadas pela interface.
 
 ## Build e implantacao
 

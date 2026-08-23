@@ -8,6 +8,8 @@ O codigo atual conhece os layouts de `CItemWorldData` e `CItemStatus`, mas ainda
 
 Na ABI v1, `Mod_Initialize` retorna falha explicitamente e o loader mostra o erro. Nao use injecao manual para contornar essa validacao.
 
+Os valores planejados permanecem em `config.json`, separados das definicoes e limites de `mod.json`. Isso nao habilita o mod enquanto o hook obrigatorio estiver ausente.
+
 Para concluir o mod e necessario:
 
 1. identificar e validar o construtor/factory ou um metodo estavel que receba `CItemWorldData*`;

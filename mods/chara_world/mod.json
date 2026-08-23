@@ -18,14 +18,12 @@
       "name": "Valor da Energia Travada",
       "type": "slider_int",
       "min": 10,
-      "max": 999,
-      "value": 100
+      "max": 999
     },
     {
       "id": "freeze_energy",
       "name": "Congelar Energia Automaticamente",
-      "type": "toggle",
-      "value": true
+      "type": "toggle"
     }
   ]
 }

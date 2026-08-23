@@ -18,22 +18,19 @@
       "name": "Níveis de Equipamento por Andar (+Lv)",
       "type": "slider_int",
       "min": 1,
-      "max": 10,
-      "value": 5
+      "max": 10
     },
     {
       "id": "auto_subdue",
       "name": "Subjugar Inocentes Automaticamente (100%)",
-      "type": "toggle",
-      "value": true
+      "type": "toggle"
     },
     {
       "id": "mystery_room_rate",
       "name": "Taxa de Spawn de Mystery Rooms (%)",
       "type": "slider_int",
       "min": 10,
-      "max": 100,
-      "value": 75
+      "max": 100
     }
   ]
 }
