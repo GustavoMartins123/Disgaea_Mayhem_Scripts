@@ -1,18 +1,15 @@
 {
   "schema_version": 1,
   "id": "dlc_boost_unlocker",
-  "name": "DLCs, Microtransações & Boost Tickets 900%",
+  "name": "DLCs e Consumíveis Steam Reutilizáveis",
   "category": "Recursos & Inventário",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Emula ISteamApps e ISteamInventory via SmokeAPI, converte consumíveis para resgate offline infinito no NPC Carlbunch e sincroniza 30x Boost Tickets com multiplicador de +900% na sessão ativa.",
-  "type": "action",
+  "description": "Libera os DLCs disponíveis e permite resgatar novamente os cinco consumíveis da Steam sem alterar as tabelas do jogo nem marcar esses itens como DLCs recebidos.",
+  "type": "toggle",
   "load_order": 210,
-  "auto_apply": true,
-  "action_label": "Aplicar conteúdo",
-  "success_status": "Conteúdo e Boost Tickets aplicados com sucesso.",
-  "executable": "APLICAR_MOD_DLC.exe",
+  "plugin": "dlc_unlocker.dll",
   "components": [
-    "mods/dlc_unlocker/APLICAR_MOD_DLC.exe"
+    "mods/dlc_unlocker/dlc_unlocker.dll"
   ]
 }

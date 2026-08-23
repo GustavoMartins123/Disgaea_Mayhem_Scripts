@@ -14,6 +14,8 @@
    aplicação temporária dos valores da Cheat Shop.
 5. [SUBSISTEMA_DARK_ASSEMBLY.md](SUBSISTEMA_DARK_ASSEMBLY.md): decisão das
    votações e aprovação temporária em memória.
+6. [SUBSISTEMA_DLC_UNLOCKER.md](SUBSISTEMA_DLC_UNLOCKER.md): DLCs, consumíveis
+   Steam e resgate reutilizável sem alteração das tabelas.
 
 ## VTables e classes RTTI catalogadas
 
@@ -36,6 +38,7 @@
 | `CListItemData_Cheat` | `0x140A67950` | `0xA67950` | `0xCEF620` | Cópia mostrada na lista da Cheat Shop |
 | `CTask_Vote_Voting` | `0x140A59960` | `0xA59960` | `0xCE7EB8` | Dados e resultado da votação |
 | `CState_Vote@CTask_Vote_Voting` | `0x140A59850` | `0xA59850` | `0xCE7D58` | Estado da votação |
+| `CSteamInventoryService` | `0x140A85BE8` | `0xA85BE8` | — | Operações do inventário Steam |
 
 ## Resumo do Item World
 
