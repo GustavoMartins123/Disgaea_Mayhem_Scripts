@@ -1411,7 +1411,6 @@ void BuildOverlay(const ImVec2& display_size) {
         }
 
         const ImVec2 row_start = ImGui::GetCursorScreenPos();
-        const ImVec2 row_local_start = ImGui::GetCursorPos();
         const float row_wrap_width = std::max(
             80.0f * ui_scale, ImGui::GetContentRegionAvail().x - 12.0f * ui_scale);
         const float label_height = ImGui::CalcTextSize(
@@ -1429,14 +1428,16 @@ void BuildOverlay(const ImVec2& display_size) {
             ImGui::SetItemDefaultFocus();
         }
 
-        const ImVec2 row_end = ImGui::GetCursorScreenPos();
-        ImGui::SetCursorScreenPos(ImVec2(
-            row_start.x + ImGui::GetStyle().FramePadding.x,
-            row_start.y + ImGui::GetStyle().FramePadding.y));
-        ImGui::PushTextWrapPos(row_local_start.x + row_wrap_width);
-        ImGui::TextUnformatted(label);
-        ImGui::PopTextWrapPos();
-        ImGui::SetCursorScreenPos(row_end);
+        ImGui::GetWindowDrawList()->AddText(
+            ImGui::GetFont(),
+            ImGui::GetFontSize(),
+            ImVec2(
+                row_start.x + ImGui::GetStyle().FramePadding.x,
+                row_start.y + ImGui::GetStyle().FramePadding.y),
+            ImGui::GetColorU32(ImGuiCol_Text),
+            label,
+            nullptr,
+            row_wrap_width);
 
         ImGui::PopID();
     }
