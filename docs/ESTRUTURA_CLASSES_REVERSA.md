@@ -46,6 +46,8 @@
 | `CEnemyStateMachine` | `0x140A1C178` | `0xA1C178` | `0xC9F218` | Execução de busca, movimento e ataque |
 | `CEnemyTacticsStateMachine` | `0x140A1BF20` | `0xA1BF20` | `0xC9F0E8` | Estados da decisão tática |
 | `CEnemyTacticsManagement` | `0x140A1BEE0` | `0xA1BEE0` | `0xC9FDB0` | Atualização e avaliação da tática |
+| `CEnemyTactics` | `0x140A1BEF0` | `0xA1BEF0` | `0xC9F1F0` | Proprietário do estado tático; aponta para o gerenciador em `+0xB0` |
+| `CEnemyStatus` | `0x140A1BF10` | `0xA1BF10` | `0xC9F270` | Status mantido em `CEnemyController + 0x18` |
 | `CEnemyTactics_OrderData` | `0x140A1C0B0` | `0xA1C0B0` | `0xC9B130` | Condições e loteria de tasks |
 | `CEnemyTacticsTask` | `0x140A1BE98` | `0xA1BE98` | `0xC9F248` | Task tática selecionada |
 | `CEnemyTacticsStatus` | `0x140A1BEA8` | `0xA1BEA8` | `0xC9F170` | Estado tático carregado |
@@ -65,6 +67,18 @@
 - `CEnemyState + 0x28` aponta para o controller, e
   `CEnemyController + 0x28` aponta para a `CCom_ExploreUnit`. A origem de criação
   dessa unidade separa inimigos de parceiros no perfil `tactical_ai`.
+- `CEnemyController + 0x18` aponta para `CEnemyStatus`, não para
+  `CEnemyTactics`.
+- `CEnemyTacticsState + 0x28` aponta para `CEnemyTactics`; por sua vez,
+  `CEnemyTactics + 0xB0` aponta para `CEnemyTacticsManagement`. Esse é o vínculo
+  usado para separar a equipe na camada tática.
+- O objeto de exploração mantém o gerenciador tático de inimigos em `+0x400` e
+  o de parceiros em `+0x408`.
+- `EnemyData + 0xA0` fornece o intervalo de ataque; `+0xA4`, o alcance de busca;
+  `+0x154/+0x158/+0x15C/+0x160`, as taxas de movimento.
+- `CEnemyTacticsState + 0xB0` aponta para a lista de temporizadores usados pelas
+  ordens temporizadas. Cada nó usa `+0x14` para o modo, `+0x30` para a duração e
+  `+0x44` para o marcador ativo.
 
 Consulte `SUBSISTEMA_IA_COMBATE.md` antes de alterar cadência, busca, alvo ou
 pesos. Vários vetores têm capacidade fixa e não podem receber novas entradas

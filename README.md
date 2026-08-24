@@ -54,6 +54,6 @@ O rotulo integrado ao Main Menu ainda depende de um gravador NMPLTEX/YKCMP. O in
 - `cheat_shop`: mantém EXP, Mana, HL, Weapon Mastery e Item Drops em `5000%` enquanto estiver ativo. O valor de Item Drops pode aumentar muito a quantidade de recompensas.
 - `dark_assembly`: aprovação garantida em memória.
 - `dlc_unlocker`: toggle residente que confirma em memória o consumo dos cinco itens simulados pelo SmokeAPI.
-- `tactical_ai`: perfis agressivos separados para inimigos e parceiros, com pausas, busca e espera antes dos ataques configuráveis em tempo real.
+- `tactical_ai`: perfis separados e toggles próprios para inimigos e parceiros, com ataque, pausas, busca, movimento, alcance e frequência de novas decisões configuráveis em tempo real.
 
 Os detalhes de engenharia reversa ficam em `docs/`. Os arquivos `.lub` de `data/script` pertencem a engine do jogo; nao sao fontes Lua de mods.

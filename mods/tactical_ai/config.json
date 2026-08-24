@@ -2,11 +2,19 @@
   "schema_version": 1,
   "mod_id": "tactical_ai",
   "options": {
-    "enemy_attack_wait_multiplier": 1,
-    "enemy_tactical_wait_multiplier": 1,
-    "enemy_search_delay_multiplier": 1,
-    "companion_attack_wait_multiplier": 0.25,
-    "companion_tactical_wait_multiplier": 0.100000001,
-    "companion_search_delay_multiplier": 0.25
+    "enemy_profile_enabled": true,
+    "enemy_attack_interval_percent": 300,
+    "enemy_pause_duration_percent": 30,
+    "enemy_search_interval_percent": 45,
+    "enemy_movement_speed_percent": 25,
+    "enemy_search_range_percent": 175,
+    "enemy_redecision_frequency_percent": 25,
+    "companion_profile_enabled": true,
+    "companion_attack_interval_percent": 10,
+    "companion_pause_duration_percent": 20,
+    "companion_search_interval_percent": 30,
+    "companion_movement_speed_percent": 500,
+    "companion_search_range_percent": 500,
+    "companion_redecision_frequency_percent": 500
   }
 }

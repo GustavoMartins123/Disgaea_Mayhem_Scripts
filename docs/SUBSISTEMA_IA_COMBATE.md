@@ -412,6 +412,8 @@ alterar globalmente o cadastro do tipo de inimigo.
 | `CEnemyStateMachine` | `0xC9F218` | `0xA1C178` | Estados concretos de execução |
 | `CEnemyTacticsStateMachine` | `0xC9F0E8` | `0xA1BF20` | Estados da camada tática |
 | `CEnemyTacticsManagement` | `0xC9FDB0` | `0xA1BEE0` | Atualização e avaliação tática |
+| `CEnemyTactics` | `0xC9F1F0` | `0xA1BEF0` | Proprietário dos estados táticos |
+| `CEnemyStatus` | `0xC9F270` | `0xA1BF10` | Status mantido pelo controller |
 | `CEnemyTactics_OrderData` | `0xC9B130` | `0xA1C0B0` | Avaliação de uma order |
 | `CEnemyTacticsTask` | `0xC9F248` | `0xA1BE98` | Task tática em execução |
 | `CEnemyTacticsStatus` | `0xC9F170` | `0xA1BEA8` | Estado tático carregado |
@@ -567,63 +569,162 @@ O executável também contém o nome
 orquestram movimento, efeitos, som e acerto da ação já escolhida. A decisão de
 alto nível continua nas tabelas de estratégia, status, order e task.
 
-## 13. Primeira implementação: perfis agressivos separados
+## 13. Perfis de combate separados
 
 O perfil foi implementado em `mods/tactical_ai/` como plugin ABI v2 independente.
 O Mod Menu apenas apresenta as opções e despacha o ciclo de vida genérico.
 
-### 13.1 Escopo
+### 13.1 Campos alterados
 
-A primeira versão reduz o tempo ocioso sem alterar atributos, dano, golpes,
-alvos ou velocidade de animação. Ela atua quando a unidade entra em três estados:
+O perfil atua sobre valores locais de cada estado. O cadastro compartilhado não
+é modificado, portanto inimigos e parceiros podem receber valores diferentes.
 
-| Estado | Entrada, RVA | Temporizadores ajustados |
-| --- | ---: | --- |
-| `CEnemyState_AttackWait` | `0x17BF60` | `+0x70`, `+0x78`, `+0x1A8`, `+0x1B0` |
-| `CEnemyState_Wait` | `0x17A5E0` | `+0x40`, `+0x48`, `+0x70`, `+0x78` |
-| `CEnemyState_Searching` | `0x183FF0` | `+0x70`, `+0x78` |
+| Controle | Origem confirmada | Cópia local alterada |
+| --- | --- | --- |
+| intervalo de ataque | `EnemyData + 0xA0` | `CEnemyState_AttackWait + 0x1A8/+0x1B0` |
+| duração das pausas | entrada `0x17A5E0` | `CEnemyState_Wait + 0x40/+0x48/+0x70/+0x78` |
+| intervalo de busca | entrada `0x183FF0` | `CEnemyState_Searching + 0x70/+0x78` |
+| deslocamento lateral | `EnemyData + 0x154` | estado de execução `+0x90` |
+| corrida | `EnemyData + 0x158` | estado de execução `+0x98` |
+| mergulho | `EnemyData + 0x160` | estado de execução `+0x9C` |
+| investida | `EnemyData + 0x15C` | `CEnemyState_Attack_Rush + 0x1F0` |
+| alcance de busca | `EnemyData + 0xA4` | `CEnemyState_Searching + 0x1B4` |
 
-Os offsets acima guardam os pares de duração criados pelas próprias rotinas de
-entrada. O hook chama a função original primeiro e só então aplica o
-multiplicador ao valor recém-criado.
+O carregamento comum de movimento começa em `0x175E60`. Ele combina o valor
+base da unidade com as taxas de `EnemyData` e grava os três campos locais. A
+inicialização de investida em `0x180E20` grava `+0x1F0`; a inicialização de busca
+em `0x183C50` grava `+0x1B4`. Os hooks são executados depois dessas rotinas.
+
+Na fase inspecionada, um `CEnemyState_Searching` ativo continha `2,460` em
+`+0x90`, `9,840` em `+0x98` e `24,600` em `+0x9C`. Estados `Free` ainda não
+inicializados para movimento mantinham `1,0`. Isso confirma que o carregamento
+comum preenche valores reais e diferentes conforme o estado.
+
+No intervalo de ataque, apenas o par `+0x1A8/+0x1B0` é tratado como o valor
+derivado de `EnemyData + 0xA0`. O par `+0x70/+0x78` da mesma rotina não é mais
+apresentado como intervalo real de ataque.
 
 ### 13.2 Inimigos e parceiros
 
 As rotinas de criação de companions chamam a mesma fábrica que cria
-`CEnemyController`, conforme a cadeia da seção 11.5. A origem descrita na seção
-11.6 registra cada `CCom_ExploreUnit` como inimigo ou parceiro. Quando um estado
-é iniciado, o plugin resolve `estado -> controller -> unidade` e escolhe o
-conjunto correspondente de multiplicadores.
+`CEnemyController`, conforme a cadeia da seção 11.5. Na camada de execução, a
+origem descrita na seção 11.6 registra cada `CCom_ExploreUnit` como inimigo ou
+parceiro. Quando um estado de movimento ou ataque é iniciado, o plugin resolve
+`estado -> controller -> unidade`.
 
 O nome interno da classe não é usado como filtro. Também não há classificação
 por posição, alvo, estratégia ou outro sinal indireto.
 
-### 13.3 Opções
+Depois que a fábrica `0x192950` retorna, o vínculo confirmado da execução é:
 
-Os valores são aplicados sobre o temporizador original, nunca sobre um valor já
-reduzido:
+```text
+CCom_ExploreUnit registrada
+  -> CEnemyController
+```
 
-| Lado | Opção | Padrão | Faixa |
-| --- | --- | ---: | ---: |
-| inimigos | tempo antes do ataque | 0,55x | 0,25x a 1,00x |
-| inimigos | duração das pausas | 0,35x | 0,10x a 1,00x |
-| inimigos | intervalo de busca | 0,60x | 0,25x a 1,00x |
-| parceiros | tempo antes do ataque | 0,40x | 0,25x a 1,00x |
-| parceiros | duração das pausas | 0,20x | 0,10x a 1,00x |
-| parceiros | intervalo de busca | 0,40x | 0,25x a 1,00x |
+`CEnemyController + 0x18` aponta para `CEnemyStatus`, VTable `0xA1BF10`. A
+classificação anterior desse objeto como `CEnemyTactics` estava errada e fazia o
+perfil interromper a operação ao entrar em uma fase.
 
-`1,00x` conserva a duração sorteada pelo jogo. O piso impede que as transições
-sejam reduzidas a zero.
+Na camada tática, o vínculo correto é independente do controller:
 
-### 13.4 Segurança e reversão
+```text
+CEnemyTacticsState + 0x28
+  -> CEnemyTactics, VTable 0xA1BEF0
+  -> CEnemyTacticsManagement, em CEnemyTactics + 0xB0
+```
+
+Há ainda dois gerenciadores táticos separados no objeto da exploração:
+
+| Campo | Equipe | Chamada de `update_Normal`, retorno |
+| ---: | --- | ---: |
+| `+0x400` | inimigos | `0x41D2DD` |
+| `+0x408` | parceiros | `0x41D2F3` |
+
+O fluxo `makeEnemyUnit` usa explicitamente `+0x400`; o fluxo
+`makeCompanionPlayerUnit` usa `+0x408`. A rotina `update_Normal`, RVA `0x194AD0`,
+possui apenas esses dois chamadores nesta build. O plugin registra o ponteiro do
+gerenciador antes de cada atualização e resolve o lado do estado pelo vínculo
+acima.
+
+Uma inspeção somente de leitura durante uma fase carregada encontrou exatamente
+dois gerenciadores e 18 estados táticos: 17 apontavam para o gerenciador de
+inimigos e um para o gerenciador de parceiros. Todos os 18 usavam
+`CEnemyTactics + 0xB0`; nenhum apontava para `CEnemyStatus`.
+
+A sonda reproduzível está em `native/research/tactical_ai_probe.cpp`. Ela
+descobre o processo automaticamente e usa apenas permissão de consulta e leitura.
+
+### 13.3 `RELOTTERY_SEC`
+
+O campo `EnemyTacticsOrderData + 0x84` define o modo da nova loteria. A rotina
+`0x18AAA0` converte os modos do dado para o estado tático:
+
+| Valor no dado | Modo local |
+| ---: | ---: |
+| `1`, `SEC` | `0` |
+| `2`, `TASKSHORT` | `1` |
+| `3`, `TASKSHORT_SEC` | `2` |
+| `4`, `TASKFINISH` | `3` |
+| `5`, sentinela `MAX` | `4` |
+| outro | `0` |
+
+As condições temporizadas são materializadas por `0x18BC90`. Para os ramos
+`SEC` e `TASKSHORT_SEC`, essa rotina:
+
+1. lê o argumento da condição carregada;
+2. converte o valor para a base de tempo usada pelo jogo;
+3. cria um nó de 72 bytes na lista `CEnemyTacticsState + 0xB0`;
+4. grava o modo do nó em `+0x14` (`1` ou `3`);
+5. grava a duração em `+0x30` e o marcador ativo em `+0x44`.
+
+A atualização base em `0x18AF90` percorre a lista. Para cada nó ativo, atualiza
+o relógio em `+0x20`, compara com a duração em `+0x30` e solicita nova loteria
+quando o limite vence.
+
+O controle **Frequência de Nova Decisão** altera somente `nó + 0x30` nos modos
+`1` e `3`. A relação é inversa: `200%` usa metade da duração original; `50%` usa
+o dobro. `TASKFINISH` não possui temporizador e não é convertido silenciosamente
+em outro modo.
+
+### 13.4 Opções
+
+Os valores são percentuais do campo original:
+
+| Equipe | Ataque | Pausa | Busca | Movimento | Alcance | Nova decisão |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| inimigos | 40% | 30% | 45% | 160% | 175% | 250% |
+| parceiros | 30% | 20% | 30% | 180% | 200% | 300% |
+
+Ataque, pausa e busca representam duração: um valor menor encerra o intervalo
+mais cedo. Movimento e alcance são multiplicadores diretos. Nova decisão
+representa frequência e, por isso, usa a relação inversa com a duração.
+
+As faixas são:
+
+- ataque, pausa e busca: `10%` a `300%`;
+- movimento, alcance e nova decisão: `25%` a `500%`.
+
+Os padrões foram escolhidos para produzir uma diferença visível no primeiro
+teste. Todos os controles em `100%` conservam os valores do jogo.
+
+Cada equipe também possui um toggle **Ativar Ajustes**. Desmarcá-lo restaura os
+snapshots apenas daquela equipe e mantém a IA original do jogo ativa. O toggle
+principal do mod continua controlando os dois perfis em conjunto.
+
+### 13.5 Segurança e reversão
 
 - o fingerprint PE é validado pelo loader;
-- os estados, a fábrica, o destrutor e os seis chamadores são verificados;
+- os estados, os dois gerenciadores, a fábrica, o destrutor e todos os seus
+  chamadores conhecidos são verificados;
 - cada objeto é validado como memória gravável e cada duração tem limite de
   sanidade;
-- a equipe precisa ter sido registrada por um dos quatro criadores conhecidos;
+- estados de execução exigem uma unidade registrada por um dos quatro criadores;
+- estados táticos exigem o vínculo confirmado
+  `estado -> tática -> gerenciador`;
 - uma recriação só é aceita para uma unidade que já possua identidade;
-- até 512 estados ativos mantêm snapshot do valor original;
+- estados, campos de movimento e temporizadores táticos mantêm snapshots
+  separados, com até 512 entradas em cada grupo;
 - mudar um slider recalcula os snapshots a partir do original;
 - desativar suspende os hooks, aguarda chamadas em andamento e restaura os
   estados ainda válidos;
@@ -632,20 +733,18 @@ sejam reduzidas a zero.
 
 O plugin não altera `.dat`, scripts `.lub`, banco local ou save.
 
-### 13.5 Telemetria atual
+### 13.6 Telemetria atual
 
 O log registra a primeira amostra de cada estado por equipe e, ao desativar,
 informa separadamente quantas entradas de espera de ataque, pausa e busca foram
-ajustadas em inimigos e parceiros.
+ajustadas em inimigos e parceiros. Movimento, alcance e frequência de nova
+decisão também registram uma amostra por equipe.
 
-### 13.6 Etapas futuras
+### 13.7 Fora do perfil atual
 
-O perfil ainda não altera `searchArea`, pesos de tasks ou `RELOTTERY_SEC`. Esses
-pontos permanecem úteis para uma segunda versão, mas exigem validação dinâmica
-das estruturas carregadas e da unidade dos intervalos.
-
-Também permanecem fora desta versão: posicionamento coletivo, desvio,
-coordenação, seleção de habilidade e regras específicas por boss.
+Permanecem fora desta versão: pesos de tasks, troca do modo `TASKFINISH`,
+posicionamento coletivo, desvio, coordenação, seleção de habilidade e regras
+específicas por boss.
 
 ## 14. Estrutura do mod
 
@@ -663,8 +762,9 @@ Responsabilidades da DLL:
 
 1. validar o fingerprint da build;
 2. validar as rotinas, VTables e objetos de estado;
-3. interceptar somente as três entradas documentadas;
-4. capturar um snapshot antes da primeira alteração de cada estado;
+3. interceptar as três entradas de duração, os três carregamentos de parâmetros
+   e a atualização tática documentados;
+4. capturar um snapshot antes da primeira alteração de cada campo;
 5. recalcular os valores sempre a partir do snapshot;
 6. restaurar o snapshot ao desativar;
 7. rejeitar a ativação se qualquer validação estrutural falhar.
@@ -686,7 +786,14 @@ Não deve haver varredura alternativa, offset substituto ou aplicação parcial.
 - criação de `CEnemyController` nos fluxos de companion player e companion kids;
 - cadeia `CEnemyState -> CEnemyController -> CCom_ExploreUnit`;
 - quatro origens de criação e dois caminhos de recriação do controller;
-- separação dos multiplicadores e da telemetria por equipe;
+- `CEnemyController + 0x18 -> CEnemyStatus`;
+- `CEnemyTacticsState + 0x28 -> CEnemyTactics`;
+- `CEnemyTactics + 0xB0 -> CEnemyTacticsManagement`;
+- gerenciador de inimigos em `+0x400` e de parceiros em `+0x408`;
+- origem e cópia local de intervalo de ataque, movimento e alcance de busca;
+- lista de temporizadores táticos em `CEnemyTacticsState + 0xB0`;
+- modo do nó temporizado em `+0x14`, duração em `+0x30` e ativo em `+0x44`;
+- separação dos seis controles, dos toggles e da telemetria por equipe;
 - atualização sobre unidades da exploração em tempo real.
 
 ### Inferência apoiada por evidência
@@ -698,7 +805,7 @@ Não deve haver varredura alternativa, offset substituto ou aplicação parcial.
 
 ### Pendente
 
-- unidade e escala exatas de todos os argumentos de `RELOTTERY`;
+- significado dos argumentos não temporizados de `RELOTTERY`;
 - nomes definitivos dos campos internos de condição da task table;
 - semântica dos três campos restantes das ações em `enemyTaskActionList`;
 - ponteiro proprietário da máquina de estado tática;

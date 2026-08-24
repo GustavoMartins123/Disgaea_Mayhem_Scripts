@@ -1,51 +1,66 @@
-# IA - Perfil Agressivo
+# IA - Perfis de Combate
 
-Reduz a demora da IA durante o combate em tempo real. Inimigos e parceiros usam
-a mesma base do jogo, mas possuem controles separados neste mod.
+Ajusta a IA de combate em tempo real. Inimigos e parceiros usam controles
+separados, mesmo que o jogo compartilhe as mesmas classes entre as duas equipes.
+
+## Como ler os valores
+
+`100%` mantém o valor original.
+
+- Intervalo de ataque, duração das pausas e intervalo de busca: valores menores
+  deixam a ação mais rápida.
+- Velocidade de movimento, alcance de busca e frequência de nova decisão:
+  valores maiores aumentam o efeito.
+
+O perfil inicial usa diferenças fortes o bastante para serem percebidas durante
+um combate. Para comparar com o jogo sem ajustes, coloque todos os controles em
+`100%`.
 
 ## Controles
 
-- **Inimigos - Tempo Antes do Ataque**: reduz a espera antes de um ataque.
-- **Inimigos - Duração das Pausas**: reduz pausas entre decisões.
-- **Inimigos - Intervalo de Busca**: procura um alvo novamente mais cedo.
-- **Parceiros - Tempo Antes do Ataque**: reduz a espera antes de um ataque.
-- **Parceiros - Duração das Pausas**: reduz pausas entre decisões.
-- **Parceiros - Intervalo de Busca**: procura um alvo novamente mais cedo.
+Cada equipe possui os mesmos seis controles:
 
-`1.0` mantém o tempo original. Valores menores tornam a IA mais rápida. A
-configuração inicial dos inimigos usa `0.55`, `0.35` e `0.60`. A dos parceiros
-usa `0.40`, `0.20` e `0.40`.
+- **Ativar Ajustes**: aplica ou restaura apenas o perfil daquela equipe. O
+  toggle principal do mod continua ativando ou desativando o conjunto inteiro.
 
-## Funcionamento
+- **Intervalo de Ataque**: altera a espera carregada pelo jogo antes do próximo
+  ataque.
+- **Duração das Pausas**: altera o tempo dos estados de espera.
+- **Intervalo de Busca**: altera a demora antes de uma nova procura por alvo.
+- **Velocidade de Movimento**: altera deslocamento lateral, corrida, mergulho e
+  investida.
+- **Alcance de Busca**: altera a área usada para encontrar alvos.
+- **Frequência de Nova Decisão**: altera os temporizadores das ordens `SEC` e
+  `TASKSHORT_SEC`. `200%` faz essas ordens vencerem em metade do tempo original.
 
-O plugin intercepta a inicialização de `CEnemyState_AttackWait`,
-`CEnemyState_Wait` e `CEnemyState_Searching`. Somente os temporizadores criados
-por esses estados são alterados. O nome interno `CEnemyState` não limita o uso a
-inimigos: as estratégias de parceiros também entram nessa máquina de estados.
+## Separação entre inimigos e parceiros
 
-O jogo cria o mesmo `CEnemyController` para os dois lados. O plugin registra a
-origem da unidade no momento em que esse controller é criado: os caminhos
-`makeCompanionPlayerUnit` e `makeCompanionKidsUnit` identificam parceiros; os
-caminhos `makeEnemyUnit` e `makeEnemyKidsUnit` identificam inimigos. O estado de
-combate aponta para o controller, que aponta para a unidade registrada. Nenhuma
-classificação é feita por distância, alvo ou nome da estratégia.
+O jogo mantém um gerenciador para os inimigos e outro para os parceiros. O
+plugin registra os dois durante a atualização da fase. Os estados táticos
+apontam diretamente para um desses gerenciadores; os estados de movimento e
+ataque continuam ligados à unidade criada. Não há classificação por nome,
+posição ou alvo.
 
-O mod não altera dano, HP, velocidade de animação, arquivos `.dat` ou save. Ao
-desativar, os temporizadores monitorados são restaurados e novos estados voltam
-ao comportamento original.
+## Ativação e desativação
 
-Se a equipe não estiver registrada, um chamador da fábrica for desconhecido, um
-estado não corresponder à estrutura esperada ou o limite monitorado for
-atingido, o perfil inteiro é interrompido e os valores já alterados são
-restaurados.
+Os valores são mantidos apenas na sessão. O plugin guarda o valor original de
+cada estado ativo, recalcula a partir desse valor quando uma opção muda e o
+restaura ao desativar.
 
-As primeiras amostras e a quantidade de estados ajustados por lado são
-registradas em `mods/mod_loader.log`.
+Desmarcar **Ativar Ajustes dos Inimigos** ou **Ativar Ajustes dos Parceiros**
+restaura somente a equipe escolhida. O jogo continua controlando normalmente a
+equipe; apenas os multiplicadores do mod deixam de ser aplicados.
+
+Se a equipe, a estrutura ou um valor não corresponder ao esperado, o perfil é
+interrompido e os valores já alterados são restaurados. O mod não altera `.dat`,
+scripts, banco local ou save.
+
+As primeiras alterações de cada grupo são registradas em
+`mods/mod_loader.log`.
 
 ## Build suportada
 
 - timestamp PE: `0x6A6AB373`;
 - `SizeOfImage`: `0x00E01000`.
 
-Se a build ou os estados esperados não corresponderem, o plugin rejeita a
-inicialização.
+Outra build é recusada na inicialização.
