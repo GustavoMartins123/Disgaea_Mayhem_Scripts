@@ -111,6 +111,9 @@ inline void DrainActiveCalls(const std::atomic<LONG>& counter) {
     while (counter.load(std::memory_order_acquire) != 0) SwitchToThread();
 }
 
+inline const DmModLoaderApi* g_loader = nullptr;
+inline const char* g_mod_id = "plugin";
+
 class HostLog {
 public:
     void Bind(const DmModLoaderApi* loader, const char* component) {
@@ -127,20 +130,52 @@ private:
     const char* component_ = "plugin";
 };
 
-inline bool AcceptHostContext(const DmModHostContext* context, bool require_verified_build) {
+inline bool AcceptHostContext(const DmModHostContext* context, const char* mod_id,
+                              bool require_verified_build) {
     if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
         context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||
         context->loader->struct_size != sizeof(DmModLoaderApi) ||
-        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION) {
+        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION ||
+        context->loader->CreateHook == nullptr || context->loader->QueueHook == nullptr ||
+        context->loader->ApplyHooks == nullptr || context->loader->RemoveHook == nullptr) {
         return false;
     }
     if (context->game_module_base == 0) return false;
     if (require_verified_build && context->game_build_verified == FALSE) return false;
 
+    g_loader = context->loader;
+    g_mod_id = mod_id;
     g_game_image.base = context->game_module_base;
     g_game_image.size = context->game_module_size;
     g_game_image.verified = context->game_build_verified != FALSE;
     return true;
+}
+
+inline void ReleaseHost() { g_loader = nullptr; }
+
+inline bool CreateHook(void* target, void* detour, void** original) {
+    return g_loader != nullptr &&
+           g_loader->CreateHook(g_mod_id, target, detour, original) != FALSE;
+}
+
+inline bool QueueHook(void* target, bool enabled) {
+    return g_loader != nullptr &&
+           g_loader->QueueHook(g_mod_id, target, enabled ? TRUE : FALSE) != FALSE;
+}
+
+inline bool ApplyHooks() {
+    return g_loader != nullptr && g_loader->ApplyHooks() != FALSE;
+}
+
+inline bool RemoveHook(void* target) {
+    return g_loader != nullptr && g_loader->RemoveHook(g_mod_id, target) != FALSE;
+}
+
+inline bool EnableHooks(void* const* targets, std::size_t count, bool enabled) {
+    for (std::size_t index = 0; index < count; ++index) {
+        if (targets[index] == nullptr || !QueueHook(targets[index], enabled)) return false;
+    }
+    return ApplyHooks();
 }
 
 inline std::uintptr_t Rva(std::uintptr_t rva) { return g_game_image.base + rva; }

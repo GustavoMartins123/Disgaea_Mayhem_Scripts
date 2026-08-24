@@ -10,7 +10,6 @@
 #include <cstring>
 #include <limits>
 
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
 #include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
@@ -51,7 +50,7 @@ void* g_param_bonus_hook_target = nullptr;
 TurnResolveFn g_original_turn_resolve = nullptr;
 InformationSyncFn g_original_information_sync = nullptr;
 ParamBonusApplyFn g_original_param_bonus_apply = nullptr;
-bool g_minhook_initialized = false;
+bool g_hooks_created = false;
 dm::HostLog Log;
 SRWLOCK g_param_bonus_lock = SRWLOCK_INIT;
 
@@ -236,28 +235,17 @@ bool InstallHooks() {
         return false;
     }
 
-    if (MH_Initialize() != MH_OK) {
-        Log("Falha ao inicializar MinHook.");
-        g_turn_hook_target = nullptr;
-        g_information_hook_target = nullptr;
-        g_param_bonus_hook_target = nullptr;
-        return false;
-    }
-    g_minhook_initialized = true;
-
-    if (MH_CreateHook(g_turn_hook_target, reinterpret_cast<LPVOID>(&HookTurnResolve),
-                      reinterpret_cast<LPVOID*>(&g_original_turn_resolve)) != MH_OK ||
-        MH_CreateHook(g_information_hook_target,
-                      reinterpret_cast<LPVOID>(&HookInformationSync),
-                      reinterpret_cast<LPVOID*>(&g_original_information_sync)) != MH_OK ||
-        MH_CreateHook(g_param_bonus_hook_target,
-                      reinterpret_cast<LPVOID>(&HookParamBonusApply),
-                      reinterpret_cast<LPVOID*>(&g_original_param_bonus_apply)) != MH_OK) {
-        MH_RemoveHook(g_turn_hook_target);
-        MH_RemoveHook(g_information_hook_target);
-        MH_RemoveHook(g_param_bonus_hook_target);
-        MH_Uninitialize();
-        g_minhook_initialized = false;
+    if (!dm::CreateHook(g_turn_hook_target, reinterpret_cast<void*>(&HookTurnResolve),
+                        reinterpret_cast<void**>(&g_original_turn_resolve)) ||
+        !dm::CreateHook(g_information_hook_target,
+                        reinterpret_cast<void*>(&HookInformationSync),
+                        reinterpret_cast<void**>(&g_original_information_sync)) ||
+        !dm::CreateHook(g_param_bonus_hook_target,
+                        reinterpret_cast<void*>(&HookParamBonusApply),
+                        reinterpret_cast<void**>(&g_original_param_bonus_apply))) {
+        dm::RemoveHook(g_turn_hook_target);
+        dm::RemoveHook(g_information_hook_target);
+        dm::RemoveHook(g_param_bonus_hook_target);
         g_turn_hook_target = nullptr;
         g_information_hook_target = nullptr;
         g_param_bonus_hook_target = nullptr;
@@ -268,44 +256,37 @@ bool InstallHooks() {
         return false;
     }
 
+    g_hooks_created = true;
     return true;
 }
 
 bool SyncHookStates() {
-    if (!g_minhook_initialized || g_turn_hook_target == nullptr ||
+    if (!g_hooks_created || g_turn_hook_target == nullptr ||
         g_information_hook_target == nullptr || g_param_bonus_hook_target == nullptr) {
         return false;
     }
     const bool mod_enabled = g_enabled.load(std::memory_order_acquire);
     const bool freeze = mod_enabled && g_freeze_energy.load(std::memory_order_acquire);
 
-    const auto queue = [](void* target, bool wanted) {
-        return (wanted ? MH_QueueEnableHook(target) : MH_QueueDisableHook(target)) == MH_OK;
-    };
-    return queue(g_turn_hook_target, freeze) &&
-           queue(g_information_hook_target, freeze) &&
-           queue(g_param_bonus_hook_target, mod_enabled) &&
-           MH_ApplyQueued() == MH_OK;
+    return dm::QueueHook(g_turn_hook_target, freeze) &&
+           dm::QueueHook(g_information_hook_target, freeze) &&
+           dm::QueueHook(g_param_bonus_hook_target, mod_enabled) &&
+           dm::ApplyHooks();
 }
 
 void RemoveHook() {
     g_enabled.store(false, std::memory_order_release);
     g_shutting_down.store(true, std::memory_order_release);
 
-    if (g_minhook_initialized) {
-        if (g_turn_hook_target != nullptr) MH_DisableHook(g_turn_hook_target);
-        if (g_information_hook_target != nullptr) MH_DisableHook(g_information_hook_target);
-        if (g_param_bonus_hook_target != nullptr) MH_DisableHook(g_param_bonus_hook_target);
-        while (g_active_calls.load(std::memory_order_acquire) != 0) {
-            SwitchToThread();
-        }
-        if (g_turn_hook_target != nullptr) MH_RemoveHook(g_turn_hook_target);
-        if (g_information_hook_target != nullptr) MH_RemoveHook(g_information_hook_target);
-        if (g_param_bonus_hook_target != nullptr) MH_RemoveHook(g_param_bonus_hook_target);
+    if (g_hooks_created) {
+        SyncHookStates();
+        dm::DrainActiveCalls(g_active_calls);
+        dm::RemoveHook(g_turn_hook_target);
+        dm::RemoveHook(g_information_hook_target);
+        dm::RemoveHook(g_param_bonus_hook_target);
     }
-    if (g_minhook_initialized) MH_Uninitialize();
 
-    g_minhook_initialized = false;
+    g_hooks_created = false;
     g_turn_hook_target = nullptr;
     g_information_hook_target = nullptr;
     g_param_bonus_hook_target = nullptr;
@@ -321,7 +302,7 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    if (!dm::AcceptHostContext(context, "chara_world", true)) return FALSE;
     Log.Bind(context->loader, "chara_world");
     g_shutting_down.store(false, std::memory_order_release);
     return InstallHooks() ? TRUE : FALSE;
@@ -386,6 +367,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     RemoveHook();
     Log.Reset();
+    dm::ReleaseHost();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {

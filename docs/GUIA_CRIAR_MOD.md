@@ -22,6 +22,7 @@ Você **não** precisa escrever nada disso:
 | Persistência | Grava `config.json` e `enabled.txt` por arquivo temporário + rename atômico, com rollback se a escrita falhar. |
 | Ordem de carga | `system` primeiro, depois `load_order`, desempate por `id`. |
 | Identidade da build do jogo | Resolve o módulo do jogo e valida o fingerprint PE **uma vez**, entregando o resultado pronto no `DmModHostContext`. |
+| Hooks | Uma única instância MinHook no processo. Registra dono por alvo e rejeita dois mods hookando o mesmo endereço. |
 | Log | `mods/mod_loader.log`, com timestamp, thread e componente. |
 | Actions | Executa o `executable` declarado, com timeout de 30 s e checagem de exit code. |
 
@@ -29,7 +30,7 @@ Você **não** precisa escrever nada disso:
 
 Isso é responsabilidade do seu mod:
 
-- **Hooks.** Instalar, remover e drenar chamadas em voo. Hoje cada plugin linka a própria cópia do MinHook (a Fase 8 do `TAREFAS.md` centraliza isso).
+- **Definir o que hookar.** O alvo, o detour e quando ativar. O MinHook em si é do loader.
 - **Leitura e escrita da memória do jogo.** Resolver estruturas, validar ponteiros, conferir vtables.
 - **UI.** O Mod Menu desenha a partir do manifesto. Você declara `options`; ele renderiza.
 
@@ -142,6 +143,7 @@ struct DmModLoaderApi {
     FlushModConfig                         // grava o pendente; nullptr = todos
     ExecuteModAction
     Log                                    // vai para mods/mod_loader.log
+    CreateHook / QueueHook / ApplyHooks / RemoveHook
 };
 ```
 
@@ -173,7 +175,7 @@ processo → loader.**
 ```cpp
 // Aceita o contexto e publica a imagem do jogo em dm::g_game_image.
 // require_verified_build = true rejeita build diferente da esperada.
-bool dm::AcceptHostContext(const DmModHostContext*, bool require_verified_build);
+bool dm::AcceptHostContext(const DmModHostContext*, const char* mod_id, bool require_verified_build);
 
 std::uintptr_t dm::Rva(std::uintptr_t rva);   // base do jogo + rva
 bool dm::HasVtable(std::uintptr_t obj, std::uintptr_t vtable_rva);
@@ -182,6 +184,12 @@ bool dm::MatchesPrologue(std::uintptr_t addr, const std::uint8_t*, std::size_t);
 bool dm::IsReadableRange(const void*, std::size_t);
 bool dm::IsWritableRange(const void*, std::size_t);
 bool dm::IsExecutableAddress(const void*);
+
+bool dm::CreateHook(void* target, void* detour, void** original);
+bool dm::QueueHook(void* target, bool enabled);
+bool dm::ApplyHooks();
+bool dm::RemoveHook(void* target);
+bool dm::EnableHooks(void* const* targets, std::size_t count, bool enabled);
 
 dm::CallGuard scope(g_active_calls);           // conta chamadas em voo no hook
 void dm::DrainActiveCalls(const std::atomic<LONG>&);  // espera zerar antes de desinstalar
@@ -207,7 +215,6 @@ consultada.
 #include <atomic>
 #include <cstring>
 
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
 #include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
@@ -217,7 +224,7 @@ constexpr std::uintptr_t kAlvoRva = 0x00000000;
 std::atomic<bool> g_enabled{false};
 std::atomic<LONG> g_active_calls{0};
 void* g_target = nullptr;
-bool g_minhook_initialized = false;
+bool g_hook_created = false;
 dm::HostLog Log;
 
 void (*g_original)(void*) = nullptr;
@@ -238,7 +245,7 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    if (!dm::AcceptHostContext(context, "meu_mod", true)) return FALSE;
     Log.Bind(context->loader, "meu_mod");
 
     static const std::uint8_t prologo[] = { 0x48, 0x89, 0x5C, 0x24 };
@@ -248,27 +255,23 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostConte
     }
     g_target = reinterpret_cast<void*>(dm::Rva(kAlvoRva));
 
-    if (MH_Initialize() != MH_OK) return FALSE;
-    g_minhook_initialized = true;
-    if (MH_CreateHook(g_target, reinterpret_cast<LPVOID>(&HookAlvo),
-                      reinterpret_cast<LPVOID*>(&g_original)) != MH_OK ||
-        MH_EnableHook(g_target) != MH_OK) {
-        MH_RemoveHook(g_target);
-        MH_Uninitialize();
-        g_minhook_initialized = false;
+    if (!dm::CreateHook(g_target, reinterpret_cast<void*>(&HookAlvo),
+                        reinterpret_cast<void**>(&g_original))) {
         return FALSE;
     }
+    g_hook_created = true;
     return TRUE;
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
-    if (!g_minhook_initialized) return FALSE;
+    if (!g_hook_created || !dm::EnableHooks(&g_target, 1, true)) return FALSE;
     g_enabled.store(true, std::memory_order_release);
     return TRUE;
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
     g_enabled.store(false, std::memory_order_release);
+    if (g_hook_created) dm::EnableHooks(&g_target, 1, false);
     return TRUE;
 }
 
@@ -278,14 +281,14 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char*, const Dm
 
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     g_enabled.store(false, std::memory_order_release);
-    if (g_minhook_initialized) {
-        MH_DisableHook(g_target);
+    if (g_hook_created) {
+        dm::EnableHooks(&g_target, 1, false);
         dm::DrainActiveCalls(g_active_calls);
-        MH_RemoveHook(g_target);
-        MH_Uninitialize();
-        g_minhook_initialized = false;
+        dm::RemoveHook(g_target);
+        g_hook_created = false;
     }
     Log.Reset();
+    dm::ReleaseHost();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
@@ -294,8 +297,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
 }
 ```
 
-Ao instalar mais de um hook, use `MH_QueueEnableHook` para cada e um `MH_ApplyQueued`
-no fim.
+Ao instalar mais de um hook, use `dm::QueueHook` para cada e um `dm::ApplyHooks()` no
+fim, ou `dm::EnableHooks` com o array de alvos.
 
 ### `Mod_SetOption` com options
 
@@ -372,7 +375,7 @@ system mod obrigatório falhar, o bootstrap termina fail-closed.
 - [ ] `dm::AcceptHostContext` no início de `Mod_Initialize`
 - [ ] Prólogo conferido antes de hookar
 - [ ] `dm::CallGuard` em todo detour
-- [ ] `dm::DrainActiveCalls` antes de `MH_RemoveHook`
-- [ ] `MH_QueueEnableHook` + `MH_ApplyQueued` se houver mais de um hook
+- [ ] `dm::DrainActiveCalls` antes de `dm::RemoveHook`
+- [ ] `dm::EnableHooks` (ou `dm::QueueHook` + `dm::ApplyHooks`) se houver mais de um hook
 - [ ] Entrada no `build.ps1` (compilação e deployment)
 - [ ] `build.ps1` passa inteiro

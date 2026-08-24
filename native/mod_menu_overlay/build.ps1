@@ -63,7 +63,6 @@ $minHookSources = @(
 )
 
 $menuObjects = [System.Collections.Generic.List[string]]::new()
-foreach ($source in $minHookSources) { $menuObjects.Add((Compile-CObject $source $menuObjectRoot)) }
 $menuObjects.Add((Compile-CppObject (Join-Path $menuProject 'mod_menu_overlay.cpp') $menuObjectRoot))
 foreach ($source in @(
     'vendor\imgui\imgui.cpp',
@@ -79,17 +78,20 @@ $menuOutput = Join-Path $buildRoot 'mod_menu.dll'
     -ld3d12 -ldxgi -ld3dcompiler -ldxguid -lxinput9_1_0 -luser32 -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_menu.dll' }
 
+$loaderMinHookObjects = [System.Collections.Generic.List[string]]::new()
+foreach ($source in $minHookSources) { $loaderMinHookObjects.Add((Compile-CObject $source $loaderObjectRoot)) }
+
 $loaderObjects = @(
     (Compile-CppObject (Join-Path $loaderProject 'dxgi_proxy.cpp') $loaderObjectRoot),
     (Compile-CppObject (Join-Path $loaderProject 'mod_loader.cpp') $loaderObjectRoot)
 )
 $loaderOutput = Join-Path $buildRoot 'dxgi.dll'
-& $gxx -shared -static-libgcc -static-libstdc++ -o $loaderOutput @loaderObjects -luser32 -lkernel32
+& $gxx -shared -static-libgcc -static-libstdc++ -o $loaderOutput @loaderObjects @loaderMinHookObjects -luser32 -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular dxgi.dll' }
 
 $validatorObject = Compile-CppObject (Join-Path $loaderProject 'validate_main.cpp') $loaderObjectRoot
 $validatorOutput = Join-Path $buildRoot 'mod_loader_validate.exe'
-& $gxx -municode -static-libgcc -static-libstdc++ -o $validatorOutput $validatorObject $loaderObjects[1] -luser32 -lkernel32
+& $gxx -municode -static-libgcc -static-libstdc++ -o $validatorOutput $validatorObject $loaderObjects[1] @loaderMinHookObjects -luser32 -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_loader_validate.exe' }
 
 $smokeRoot = Join-Path $buildRoot 'smoke-runtime'
@@ -98,17 +100,14 @@ $smokeOutput = Join-Path $smokeRoot 'mod_loader_proxy_smoke.exe'
 & $gxx @cppFlags -static -o $smokeOutput (Join-Path $loaderProject 'proxy_smoke.cpp') -lole32 -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular mod_loader_proxy_smoke.exe' }
 
-$pluginMinHookObjects = [System.Collections.Generic.List[string]]::new()
-foreach ($source in $minHookSources) { $pluginMinHookObjects.Add((Compile-CObject $source $pluginObjectRoot)) }
-
 $itemObject = Compile-CppObject (Join-Path $gameRoot 'mods\item_world\item_world.cpp') $pluginObjectRoot
 $itemWorldOutput = Join-Path $buildRoot 'item_world.dll'
-& $gxx -shared -static-libgcc -static-libstdc++ -o $itemWorldOutput $itemObject @pluginMinHookObjects -lkernel32
+& $gxx -shared -static-libgcc -static-libstdc++ -o $itemWorldOutput $itemObject -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular item_world.dll' }
 
 $charaObject = Compile-CppObject (Join-Path $gameRoot 'mods\chara_world\chara_world.cpp') $pluginObjectRoot
 $charaWorldOutput = Join-Path $buildRoot 'chara_world.dll'
-& $gxx -shared -static-libgcc -static-libstdc++ -o $charaWorldOutput $charaObject @pluginMinHookObjects -lkernel32
+& $gxx -shared -static-libgcc -static-libstdc++ -o $charaWorldOutput $charaObject -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular chara_world.dll' }
 
 $safeBackupOutput = Join-Path $buildRoot 'safe_backup.dll'
@@ -130,21 +129,21 @@ $cheatShopObject = Compile-CppObject `
     (Join-Path $gameRoot 'mods\cheat_shop\cheat_shop.cpp') $pluginObjectRoot
 $cheatShopOutput = Join-Path $buildRoot 'cheat_shop.dll'
 & $gxx -shared -static-libgcc -static-libstdc++ -o $cheatShopOutput `
-    $cheatShopObject @pluginMinHookObjects -lkernel32
+    $cheatShopObject -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular cheat_shop.dll' }
 
 $darkAssemblyObject = Compile-CppObject `
     (Join-Path $gameRoot 'mods\dark_assembly\dark_assembly.cpp') $pluginObjectRoot
 $darkAssemblyOutput = Join-Path $buildRoot 'dark_assembly.dll'
 & $gxx -shared -static-libgcc -static-libstdc++ -o $darkAssemblyOutput `
-    $darkAssemblyObject @pluginMinHookObjects -lkernel32
+    $darkAssemblyObject -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular dark_assembly.dll' }
 
 $dlcUnlockerObject = Compile-CppObject `
     (Join-Path $gameRoot 'mods\dlc_unlocker\dlc_unlocker.cpp') $pluginObjectRoot
 $dlcUnlockerOutput = Join-Path $buildRoot 'dlc_unlocker.dll'
 & $gxx -shared -static-libgcc -static-libstdc++ -o $dlcUnlockerOutput `
-    $dlcUnlockerObject @pluginMinHookObjects -lkernel32
+    $dlcUnlockerObject -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular dlc_unlocker.dll' }
 
 $target = $gameRoot.ToString()
@@ -420,7 +419,7 @@ if ($entryDifference.Count -ne 0) {
 Copy-Item -LiteralPath $packageCandidate -Destination $packageOutput -Force
 Write-Host "[OK] Pacote Nexus validado e atualizado: $packageOutput"
 
-Write-Host '[OK] Loader, Mod Menu, plugins ABI v1, instalador e pacote compilados com sucesso.'
+Write-Host '[OK] Loader, Mod Menu, plugins ABI v2, instalador e pacote compilados com sucesso.'
 
 $resolvedBuildRoot = [System.IO.Path]::GetFullPath($buildRoot)
 $expectedBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $menuProject 'build'))

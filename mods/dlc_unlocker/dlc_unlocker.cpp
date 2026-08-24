@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <cstring>
 
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
 #include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
@@ -32,7 +31,7 @@ std::atomic<bool> g_validation_error_logged{false};
 std::atomic<LONG> g_active_calls{0};
 void* g_hook_target = nullptr;
 ConsumeItemFn g_original_consume_item = nullptr;
-bool g_minhook_initialized = false;
+bool g_hook_created = false;
 dm::HostLog Log;
 
 bool EqualsItemId(const char* value, const char* expected) {
@@ -104,34 +103,26 @@ bool InstallHook() {
         return false;
     }
 
-    if (MH_Initialize() != MH_OK) {
-        Log("Falha ao inicializar MinHook.");
-        g_hook_target = nullptr;
-        return false;
-    }
-    g_minhook_initialized = true;
-    if (MH_CreateHook(g_hook_target, reinterpret_cast<LPVOID>(&HookConsumeItem),
-                      reinterpret_cast<LPVOID*>(&g_original_consume_item)) != MH_OK) {
-        MH_Uninitialize();
-        g_minhook_initialized = false;
+    if (!dm::CreateHook(g_hook_target, reinterpret_cast<void*>(&HookConsumeItem),
+                        reinterpret_cast<void**>(&g_original_consume_item))) {
         g_hook_target = nullptr;
         g_original_consume_item = nullptr;
         Log("Falha ao instalar o hook de consumo do inventario.");
         return false;
     }
+    g_hook_created = true;
     return true;
 }
 
 void RemoveHook() {
     g_enabled.store(false, std::memory_order_release);
     g_shutting_down.store(true, std::memory_order_release);
-    if (g_minhook_initialized && g_hook_target != nullptr) {
-        MH_DisableHook(g_hook_target);
+    if (g_hook_created && g_hook_target != nullptr) {
+        dm::EnableHooks(&g_hook_target, 1, false);
         dm::DrainActiveCalls(g_active_calls);
-        MH_RemoveHook(g_hook_target);
+        dm::RemoveHook(g_hook_target);
     }
-    if (g_minhook_initialized) MH_Uninitialize();
-    g_minhook_initialized = false;
+    g_hook_created = false;
     g_hook_target = nullptr;
     g_original_consume_item = nullptr;
 }
@@ -143,7 +134,7 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    if (!dm::AcceptHostContext(context, "dlc_unlocker", true)) return FALSE;
     Log.Bind(context->loader, "dlc_unlocker");
     g_shutting_down.store(false, std::memory_order_release);
     g_validation_error_logged.store(false, std::memory_order_release);
@@ -151,11 +142,10 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostConte
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
-    if (!g_minhook_initialized || g_hook_target == nullptr) {
+    if (!g_hook_created || g_hook_target == nullptr) {
         return FALSE;
     }
-    const MH_STATUS status = MH_EnableHook(g_hook_target);
-    if (status != MH_OK && status != MH_ERROR_ENABLED) {
+    if (!dm::EnableHooks(&g_hook_target, 1, true)) {
         Log("Falha ao ativar o hook de consumo do inventario.");
         return FALSE;
     }
@@ -166,7 +156,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_Enable() {
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Disable() {
     g_enabled.store(false, std::memory_order_release);
-    if (g_minhook_initialized && g_hook_target != nullptr) MH_DisableHook(g_hook_target);
+    if (g_hook_created && g_hook_target != nullptr) dm::EnableHooks(&g_hook_target, 1, false);
     return TRUE;
 }
 
@@ -177,6 +167,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char*, const Dm
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     RemoveHook();
     Log.Reset();
+    dm::ReleaseHost();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {

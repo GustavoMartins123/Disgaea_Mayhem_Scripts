@@ -56,7 +56,7 @@ mods/<mod_id>/
 ├── mod.json        # Manifesto canonico schema_version 1 (imutavel: id, tipo, limites)
 ├── config.json     # Valores correntes das options (obrigatorio p/ toggle e system)
 ├── enabled.txt     # Estado persistido: exatamente "0" ou "1"
-├── <mod_id>.dll    # Plugin ABI v1 (toggle/system)
+├── <mod_id>.dll    # Plugin ABI v2 (toggle/system)
 └── README.md       # Documentacao tecnica do mod
 ```
 

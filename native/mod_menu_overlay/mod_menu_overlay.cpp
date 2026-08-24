@@ -18,10 +18,9 @@
 #include <string>
 #include <vector>
 
-#include "MinHook.h"
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
-#include "mod_loader_api.h"
+#include "dm_mod_common.h"
 
 // -----------------------------------------------------------------------------
 // Mod Menu Engine & Overlay Implementation
@@ -632,7 +631,7 @@ NmplInputHookSpec g_nmpl_input_hooks[] = {
 void RemoveNmplInputHooks() {
     for (auto& hook : g_nmpl_input_hooks) {
         if (hook.target != nullptr) {
-            MH_RemoveHook(hook.target);
+            dm::RemoveHook(hook.target);
             hook.target = nullptr;
         }
     }
@@ -673,7 +672,7 @@ bool CreateNmplInputHooks() {
     }
 
     for (auto& hook : g_nmpl_input_hooks) {
-        if (MH_CreateHook(hook.target, hook.detour, hook.original) != MH_OK) {
+        if (!dm::CreateHook(hook.target, hook.detour, hook.original)) {
             SetFailure(1608, "Could not create an Nmpl exclusive-input hook");
             RemoveNmplInputHooks();
             return false;
@@ -684,14 +683,14 @@ bool CreateNmplInputHooks() {
 
 bool QueueEnableNmplInputHooks() {
     for (const auto& hook : g_nmpl_input_hooks) {
-        if (hook.target == nullptr || MH_QueueEnableHook(hook.target) != MH_OK) return false;
+        if (hook.target == nullptr || !dm::QueueHook(hook.target, true)) return false;
     }
     return true;
 }
 
 void DisableNmplInputHooks() {
     for (const auto& hook : g_nmpl_input_hooks) {
-        if (hook.target != nullptr) MH_DisableHook(hook.target);
+        if (hook.target != nullptr) dm::QueueHook(hook.target, false);
     }
 }
 
@@ -1951,64 +1950,44 @@ bool FindHookTargets() {
 }
 
 bool CreateHooks() {
-    MH_STATUS status = MH_Initialize();
-    if (status != MH_OK) {
-        SetFailure(1601, "MinHook initialization failed");
-        return false;
-    }
     if (!CreateNmplInputHooks()) {
-        MH_Uninitialize();
         return false;
     }
     if (!FindHookTargets()) {
         RemoveNmplInputHooks();
-        MH_Uninitialize();
         return false;
     }
-    status = MH_CreateHook(
-        g_present_target,
-        reinterpret_cast<void*>(&HookPresent),
-        reinterpret_cast<void**>(&g_original_present));
-    if (status != MH_OK) {
+    if (!dm::CreateHook(g_present_target, reinterpret_cast<void*>(&HookPresent),
+                        reinterpret_cast<void**>(&g_original_present))) {
         SetFailure(1602, "Could not create the IDXGISwapChain::Present hook");
         RemoveNmplInputHooks();
-        MH_Uninitialize();
         return false;
     }
-    status = MH_CreateHook(
-        g_resize_buffers_target,
-        reinterpret_cast<void*>(&HookResizeBuffers),
-        reinterpret_cast<void**>(&g_original_resize_buffers));
-    if (status != MH_OK) {
+    if (!dm::CreateHook(g_resize_buffers_target, reinterpret_cast<void*>(&HookResizeBuffers),
+                        reinterpret_cast<void**>(&g_original_resize_buffers))) {
         SetFailure(1603, "Could not create the IDXGISwapChain::ResizeBuffers hook");
-        MH_RemoveHook(g_present_target);
+        dm::RemoveHook(g_present_target);
         RemoveNmplInputHooks();
-        MH_Uninitialize();
         return false;
     }
-    status = MH_CreateHook(
-        g_execute_target,
-        reinterpret_cast<void*>(&HookExecuteCommandLists),
-        reinterpret_cast<void**>(&g_original_execute_command_lists));
-    if (status != MH_OK) {
+    if (!dm::CreateHook(g_execute_target, reinterpret_cast<void*>(&HookExecuteCommandLists),
+                        reinterpret_cast<void**>(&g_original_execute_command_lists))) {
         SetFailure(1604, "Could not create the ID3D12CommandQueue::ExecuteCommandLists hook");
-        MH_RemoveHook(g_resize_buffers_target);
-        MH_RemoveHook(g_present_target);
+        dm::RemoveHook(g_resize_buffers_target);
+        dm::RemoveHook(g_present_target);
         RemoveNmplInputHooks();
-        MH_Uninitialize();
         return false;
     }
     if (!QueueEnableNmplInputHooks() ||
-        MH_QueueEnableHook(g_present_target) != MH_OK ||
-        MH_QueueEnableHook(g_resize_buffers_target) != MH_OK ||
-        MH_QueueEnableHook(g_execute_target) != MH_OK ||
-        MH_ApplyQueued() != MH_OK) {
+        !dm::QueueHook(g_present_target, true) ||
+        !dm::QueueHook(g_resize_buffers_target, true) ||
+        !dm::QueueHook(g_execute_target, true) ||
+        !dm::ApplyHooks()) {
         SetFailure(1605, "Could not enable the DirectX 12 and exclusive-input hooks");
-        MH_RemoveHook(g_execute_target);
-        MH_RemoveHook(g_resize_buffers_target);
-        MH_RemoveHook(g_present_target);
+        dm::RemoveHook(g_execute_target);
+        dm::RemoveHook(g_resize_buffers_target);
+        dm::RemoveHook(g_present_target);
         RemoveNmplInputHooks();
-        MH_Uninitialize();
         return false;
     }
     return true;
@@ -2016,26 +1995,20 @@ bool CreateHooks() {
 
 void RemoveHooks() {
     g_shutting_down.store(true, std::memory_order_release);
-    if (g_present_target != nullptr) {
-        MH_DisableHook(g_present_target);
-    }
-    if (g_resize_buffers_target != nullptr) {
-        MH_DisableHook(g_resize_buffers_target);
-    }
-    if (g_execute_target != nullptr) {
-        MH_DisableHook(g_execute_target);
-    }
+    if (g_present_target != nullptr) dm::QueueHook(g_present_target, false);
+    if (g_resize_buffers_target != nullptr) dm::QueueHook(g_resize_buffers_target, false);
+    if (g_execute_target != nullptr) dm::QueueHook(g_execute_target, false);
     DisableNmplInputHooks();
+    dm::ApplyHooks();
     for (int attempt = 0;
          attempt < 5000 && g_active_hooks.load(std::memory_order_acquire) != 0;
          ++attempt) {
         Sleep(1);
     }
-    MH_RemoveHook(g_execute_target);
-    MH_RemoveHook(g_resize_buffers_target);
-    MH_RemoveHook(g_present_target);
+    dm::RemoveHook(g_execute_target);
+    dm::RemoveHook(g_resize_buffers_target);
+    dm::RemoveHook(g_present_target);
     RemoveNmplInputHooks();
-    MH_Uninitialize();
 }
 
 
@@ -2047,13 +2020,7 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (context == nullptr || context->struct_size != sizeof(DmModHostContext) ||
-        context->abi_version != DM_MOD_LOADER_ABI_VERSION || context->loader == nullptr ||
-        context->loader->struct_size != sizeof(DmModLoaderApi) ||
-        context->loader->abi_version != DM_MOD_LOADER_ABI_VERSION) {
-        return FALSE;
-    }
-
+    if (!dm::AcceptHostContext(context, "mod_menu", false)) return FALSE;
     g_loader_api = context->loader;
     InterlockedExchange(&g_shared.status, STATUS_WAITING);
     InterlockedExchange(&g_shared.error_code, 0);

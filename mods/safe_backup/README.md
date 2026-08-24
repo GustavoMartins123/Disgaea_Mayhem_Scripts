@@ -1,6 +1,6 @@
 # Guardiao de Backup Seguro
 
-Plugin nativo ABI v1 que cria backups com data e hora em
+Plugin nativo ABI v2 que cria backups com data e hora em
 `mods/safe_backup/backups/`.
 
 Ao ser ativado, ele copia todos os arquivos `save.*`. Depois, verifica

@@ -11,7 +11,6 @@
 #include <limits>
 
 #include "../../native/mod_loader/dm_mod_common.h"
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
 
 namespace {
 
@@ -35,7 +34,7 @@ void* g_generate_rarity_target = nullptr;
 ApplyRewardsFn g_original_apply_rewards = nullptr;
 AccumulateItemPointsFn g_original_accumulate_item_points = nullptr;
 GenerateRarityFn g_original_generate_rarity = nullptr;
-bool g_minhook_initialized = false;
+bool g_hooks_created = false;
 volatile LONG g_enabled = FALSE;
 volatile LONG g_level_multiplier_enabled = TRUE;
 volatile LONG g_item_point_multiplier_enabled = TRUE;
@@ -176,34 +175,31 @@ bool InstallHooks() {
         return false;
     }
 
-    if (MH_Initialize() != MH_OK) return false;
-    g_minhook_initialized = true;
-    if (MH_CreateHook(g_apply_rewards_target, reinterpret_cast<LPVOID>(&HookApplyRewards),
-                      reinterpret_cast<LPVOID*>(&g_original_apply_rewards)) != MH_OK ||
-        MH_CreateHook(g_accumulate_item_points_target,
-                      reinterpret_cast<LPVOID>(&HookAccumulateItemPoints),
-                      reinterpret_cast<LPVOID*>(&g_original_accumulate_item_points)) != MH_OK ||
-        MH_CreateHook(g_generate_rarity_target,
-                      reinterpret_cast<LPVOID>(&HookGenerateRarity),
-                      reinterpret_cast<LPVOID*>(&g_original_generate_rarity)) != MH_OK) {
-        MH_RemoveHook(g_apply_rewards_target);
-        MH_RemoveHook(g_accumulate_item_points_target);
-        MH_RemoveHook(g_generate_rarity_target);
-        MH_Uninitialize();
+    if (!dm::CreateHook(g_apply_rewards_target, reinterpret_cast<void*>(&HookApplyRewards),
+                        reinterpret_cast<void**>(&g_original_apply_rewards)) ||
+        !dm::CreateHook(g_accumulate_item_points_target,
+                        reinterpret_cast<void*>(&HookAccumulateItemPoints),
+                        reinterpret_cast<void**>(&g_original_accumulate_item_points)) ||
+        !dm::CreateHook(g_generate_rarity_target,
+                        reinterpret_cast<void*>(&HookGenerateRarity),
+                        reinterpret_cast<void**>(&g_original_generate_rarity))) {
+        dm::RemoveHook(g_apply_rewards_target);
+        dm::RemoveHook(g_accumulate_item_points_target);
+        dm::RemoveHook(g_generate_rarity_target);
         g_original_apply_rewards = nullptr;
         g_original_accumulate_item_points = nullptr;
         g_original_generate_rarity = nullptr;
-        g_minhook_initialized = false;
         g_apply_rewards_target = nullptr;
         g_accumulate_item_points_target = nullptr;
         g_generate_rarity_target = nullptr;
         return false;
     }
+    g_hooks_created = true;
     return true;
 }
 
 bool SyncHookStates() {
-    if (!g_minhook_initialized) return false;
+    if (!g_hooks_created) return false;
     const bool mod_enabled = InterlockedCompareExchange(&g_enabled, FALSE, FALSE) != FALSE;
     const struct {
         void* target;
@@ -218,35 +214,27 @@ bool SyncHookStates() {
         if (gate.target == nullptr) return false;
         const bool wanted = mod_enabled &&
                             InterlockedCompareExchange(gate.option, FALSE, FALSE) != FALSE;
-        const MH_STATUS status = wanted ? MH_QueueEnableHook(gate.target)
-                                        : MH_QueueDisableHook(gate.target);
-        if (status != MH_OK) return false;
+        if (!dm::QueueHook(gate.target, wanted)) return false;
     }
-    return MH_ApplyQueued() == MH_OK;
+    return dm::ApplyHooks();
 }
 
 void RemoveHooks() {
-    if (!g_minhook_initialized) return;
+    if (!g_hooks_created) return;
     g_shutting_down.store(true, std::memory_order_release);
-    if (g_apply_rewards_target != nullptr) MH_DisableHook(g_apply_rewards_target);
-    if (g_accumulate_item_points_target != nullptr) {
-        MH_DisableHook(g_accumulate_item_points_target);
-    }
-    if (g_generate_rarity_target != nullptr) MH_DisableHook(g_generate_rarity_target);
+    InterlockedExchange(&g_enabled, FALSE);
+    SyncHookStates();
     dm::DrainActiveCalls(g_active_calls);
-    if (g_apply_rewards_target != nullptr) MH_RemoveHook(g_apply_rewards_target);
-    if (g_accumulate_item_points_target != nullptr) {
-        MH_RemoveHook(g_accumulate_item_points_target);
-    }
-    if (g_generate_rarity_target != nullptr) MH_RemoveHook(g_generate_rarity_target);
-    MH_Uninitialize();
+    dm::RemoveHook(g_apply_rewards_target);
+    dm::RemoveHook(g_accumulate_item_points_target);
+    dm::RemoveHook(g_generate_rarity_target);
     g_original_apply_rewards = nullptr;
     g_original_accumulate_item_points = nullptr;
     g_original_generate_rarity = nullptr;
     g_apply_rewards_target = nullptr;
     g_accumulate_item_points_target = nullptr;
     g_generate_rarity_target = nullptr;
-    g_minhook_initialized = false;
+    g_hooks_created = false;
 }
 
 }  // namespace
@@ -258,7 +246,7 @@ __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 }
 
 __declspec(dllexport) BOOL WINAPI Mod_Initialize(const DmModHostContext* context) {
-    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    if (!dm::AcceptHostContext(context, "item_world", true)) return FALSE;
     Log.Bind(context->loader, "item_world");
     g_shutting_down.store(false, std::memory_order_release);
     if (!InstallHooks()) {
@@ -337,6 +325,7 @@ __declspec(dllexport) void WINAPI Mod_Shutdown() {
     InterlockedExchange(&g_enabled, FALSE);
     RemoveHooks();
     Log.Reset();
+    dm::ReleaseHost();
 }
 
 }  // extern "C"

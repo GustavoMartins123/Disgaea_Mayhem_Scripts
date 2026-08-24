@@ -9,7 +9,7 @@ Ecossistema nativo C++ para carregar e gerenciar mods do Disgaea Mayhem.
 - `mods/<id>/mod.json`: manifesto canonico `schema_version: 1` de cada mod.
 - `mods/<id>/config.json`: valores persistidos das opcoes de cada plugin residente.
 - `enabled.txt`: estado persistido de mods `toggle` e `system`.
-- `native/mod_loader/mod_loader_api.h`: ABI nativa v1 compartilhada.
+- `native/mod_loader/mod_loader_api.h`: ABI nativa v2 compartilhada; o loader é dono da única instância MinHook.
 
 O loader descobre manifestos, valida caminhos/ABI/configuracoes, carrega cada plugin uma vez e centraliza enable, disable, opcoes e actions. `mod.json` define os tipos e limites; `config.json` contem os valores correntes. Plugins nao se autoativam em `DllMain` e nao sao injetados individualmente.
 
@@ -19,7 +19,7 @@ Consulte [docs/MOD_LOADER_ARQUITETURA.md](docs/MOD_LOADER_ARQUITETURA.md) para o
 
 Extraia o pacote e, com o jogo fechado, execute `INSTALAR_MOD.exe`. O instalador
 localiza o jogo ou aceita a pasta como argumento, valida o pacote, instala o
-loader e os sete mods, configura o SmokeAPI e executa o validador ABI v1.
+loader e os sete mods, configura o SmokeAPI e executa o validador ABI v2.
 
 A instalacao e transacional. Em uma atualizacao, `config.json` e `enabled.txt`
 existentes sao preservados. Se uma copia ou a validacao final falhar, os arquivos
@@ -33,7 +33,7 @@ Com o jogo fechado:
 powershell -NoProfile -ExecutionPolicy Bypass -File native/mod_menu_overlay/build.ps1
 ```
 
-O script compila e implanta loader, Mod Menu e plugins ABI v1. O validador nativo executado ao final verifica todos os manifestos, arquivos declarados e exports.
+O script compila e implanta loader, Mod Menu e plugins ABI v2. O validador nativo executado ao final verifica todos os manifestos, arquivos declarados e exports.
 Ele tambem compila e testa o instalador em uma pasta isolada e, somente depois,
 gera `Disgaea_Mayhem_Mod_Loader_Nexus.zip` com uma lista fechada de arquivos.
 

@@ -40,12 +40,12 @@ Disgaea_Mayhem.exe
 4. Cada subpasta com `mod.json` e validada. Pastas sem manifesto sao ignoradas.
 5. IDs duplicados, caminhos com separadores, arquivo ausente, schema, configuracao ou tipo desconhecido sao rejeitados.
 6. O system mod obrigatorio e carregado primeiro. Se falhar, o bootstrap termina fail-closed.
-7. Toggles com `enabled.txt=1` sao inicializados pela ABI v1 e permanecem residentes.
+7. Toggles com `enabled.txt=1` sao inicializados pela ABI v2 e permanecem residentes.
 8. Actions usam somente o campo `executable`.
 
 Plugins nao sao descarregados durante a sessao. `Mod_Disable` remove o efeito funcional, para workers e desabilita hooks, mas a DLL continua residente. Isso evita callbacks, TLS e threads apontando para codigo descarregado.
 
-## ABI nativa v1
+## ABI nativa v2
 
 Todo plugin `toggle` ou `system` exporta exatamente:
 
@@ -95,7 +95,7 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 
 ## Estado atual dos mods
 
-- `mod_menu`: system mod ABI v1; nao gerencia DLLs.
+- `mod_menu`: system mod ABI v2; nao gerencia DLLs.
 - `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
 - `safe_backup`: uma unica worker, evento de parada, backup inicial e a cada gravação de `save.002`, com rotação pela option `max_backups`.
 - `item_world`: multiplica separadamente os pontos de nível (até 20x) e os Item Points (até 200x). A raridade mínima atinge só um dos seis call sites de `GenerateRarity`.
@@ -111,7 +111,7 @@ Os arquivos `data/script/*.lub` sao artefatos Lua compilados da engine. Nao exis
 powershell -NoProfile -ExecutionPolicy Bypass -File native/mod_menu_overlay/build.ps1
 ```
 
-O build implanta separadamente loader, Mod Menu e plugins ABI v1. Ao final, `mod_loader_validate.exe` valida schema, arquivos e exports sem executar actions. Depois, um smoke test cria uma raiz isolada apenas com o proxy e o system mod, chama `CreateDXGIFactory1` e confirma no log que os hooks e o bootstrap foram concluidos.
+O build implanta separadamente loader, Mod Menu e plugins ABI v2. Ao final, `mod_loader_validate.exe` valida schema, arquivos e exports sem executar actions. Depois, um smoke test cria uma raiz isolada apenas com o proxy e o system mod, chama `CreateDXGIFactory1` e confirma no log que os hooks e o bootstrap foram concluidos.
 
 O mesmo build compila `INSTALAR_MOD.exe`, monta uma distribuicao por lista
 fechada, valida os sete manifestos dentro dela e testa duas instalacoes isoladas:

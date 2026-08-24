@@ -1,6 +1,6 @@
 # Mod Menu de Disgaea Mayhem
 
-O Mod Menu e a interface do Mod Loader, nao o loader. Ele e carregado como system mod obrigatorio de `mods/mod_menu/mod_menu.dll` e recebe a API ABI v1 criada pelo `dxgi.dll`.
+O Mod Menu e a interface do Mod Loader, nao o loader. Ele e carregado como system mod obrigatorio de `mods/mod_menu/mod_menu.dll` e recebe a API ABI v2 criada pelo `dxgi.dll`.
 
 ## Uso
 

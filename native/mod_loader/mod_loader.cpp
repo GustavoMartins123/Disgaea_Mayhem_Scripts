@@ -5,6 +5,8 @@
 #include "mod_loader_api.h"
 #include "mod_loader_internal.h"
 
+#include "MinHook.h"
+
 #include <algorithm>
 #include <cctype>
 #include <climits>
@@ -50,9 +52,17 @@ struct ModRecord {
 constexpr DWORD kExpectedGameTimestamp = 0x6A6AB373;
 constexpr DWORD kExpectedGameImageSize = 0x00E01000;
 
+struct HookEntry {
+    void* target = nullptr;
+    std::string owner;
+};
+
 SRWLOCK g_records_lock = SRWLOCK_INIT;
 SRWLOCK g_log_lock = SRWLOCK_INIT;
 SRWLOCK g_lifecycle_lock = SRWLOCK_INIT;
+SRWLOCK g_hooks_lock = SRWLOCK_INIT;
+std::vector<HookEntry> g_hooks;
+bool g_minhook_ready = false;
 std::vector<ModRecord> g_records;
 std::uint32_t g_discovery_errors = 0;
 std::wstring g_game_directory;
@@ -829,6 +839,10 @@ BOOL WINAPI ApiSetModOption(const char* mod_id, const char* option_id, const DmM
 BOOL WINAPI ApiFlushModConfig(const char* mod_id);
 BOOL WINAPI ApiExecuteModAction(const char* mod_id);
 void WINAPI ApiLog(const char* component, const char* message);
+BOOL WINAPI ApiCreateHook(const char* mod_id, void* target, void* detour, void** original);
+BOOL WINAPI ApiQueueHook(const char* mod_id, void* target, BOOL enabled);
+BOOL WINAPI ApiApplyHooks();
+BOOL WINAPI ApiRemoveHook(const char* mod_id, void* target);
 
 const DmModLoaderApi g_api = {
     sizeof(DmModLoaderApi),
@@ -841,6 +855,10 @@ const DmModLoaderApi g_api = {
     &ApiFlushModConfig,
     &ApiExecuteModAction,
     &ApiLog,
+    &ApiCreateHook,
+    &ApiQueueHook,
+    &ApiApplyHooks,
+    &ApiRemoveHook,
 };
 
 bool LoadAndEnablePlugin(ModRecord& record) {
@@ -1138,6 +1156,74 @@ void WINAPI ApiLog(const char* component, const char* message) {
     LogLine(component != nullptr ? component : "plugin", "%s", message != nullptr ? message : "");
 }
 
+struct HooksGuard {
+    HooksGuard() { AcquireSRWLockExclusive(&g_hooks_lock); }
+    ~HooksGuard() { ReleaseSRWLockExclusive(&g_hooks_lock); }
+};
+
+const HookEntry* FindHook(void* target) {
+    for (const HookEntry& entry : g_hooks) {
+        if (entry.target == target) return &entry;
+    }
+    return nullptr;
+}
+
+BOOL WINAPI ApiCreateHook(const char* mod_id, void* target, void* detour, void** original) {
+    if (mod_id == nullptr || mod_id[0] == '\0' || target == nullptr || detour == nullptr ||
+        original == nullptr) {
+        return FALSE;
+    }
+    HooksGuard guard;
+    if (!g_minhook_ready) return FALSE;
+
+    const HookEntry* existing = FindHook(target);
+    if (existing != nullptr) {
+        LogLine("loader", "hook duplicado rejeitado: %s tentou 0x%llX, ja registrado por %s",
+                mod_id, static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(target)),
+                existing->owner.c_str());
+        return FALSE;
+    }
+    if (MH_CreateHook(target, detour, original) != MH_OK) {
+        LogLine("loader", "MH_CreateHook falhou para %s em 0x%llX", mod_id,
+                static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(target)));
+        return FALSE;
+    }
+    g_hooks.push_back(HookEntry{target, mod_id});
+    return TRUE;
+}
+
+BOOL WINAPI ApiQueueHook(const char* mod_id, void* target, BOOL enabled) {
+    if (mod_id == nullptr || target == nullptr) return FALSE;
+    HooksGuard guard;
+    if (!g_minhook_ready) return FALSE;
+    const HookEntry* entry = FindHook(target);
+    if (entry == nullptr || entry->owner != mod_id) return FALSE;
+    const MH_STATUS status =
+        enabled != FALSE ? MH_QueueEnableHook(target) : MH_QueueDisableHook(target);
+    return status == MH_OK ? TRUE : FALSE;
+}
+
+BOOL WINAPI ApiApplyHooks() {
+    HooksGuard guard;
+    if (!g_minhook_ready) return FALSE;
+    return MH_ApplyQueued() == MH_OK ? TRUE : FALSE;
+}
+
+BOOL WINAPI ApiRemoveHook(const char* mod_id, void* target) {
+    if (mod_id == nullptr || target == nullptr) return FALSE;
+    HooksGuard guard;
+    if (!g_minhook_ready) return FALSE;
+    for (std::size_t index = 0; index < g_hooks.size(); ++index) {
+        if (g_hooks[index].target != target) continue;
+        if (g_hooks[index].owner != mod_id) return FALSE;
+        MH_DisableHook(target);
+        const bool removed = MH_RemoveHook(target) == MH_OK;
+        g_hooks.erase(g_hooks.begin() + static_cast<std::ptrdiff_t>(index));
+        return removed ? TRUE : FALSE;
+    }
+    return FALSE;
+}
+
 bool DiscoverMods() {
     g_discovery_errors = 0;
     const std::wstring mods_directory = g_game_directory + L"\\mods";
@@ -1268,6 +1354,11 @@ bool InitializePathsAndLog(const wchar_t* explicit_game_directory) {
 DWORD WINAPI DmModLoaderRun(LPVOID) {
     if (!InitializePathsAndLog(nullptr)) return 1;
     ResolveGameModule();
+    if (MH_Initialize() != MH_OK) {
+        LogLine("loader", "MH_Initialize falhou; nenhum plugin podera instalar hooks");
+        return 5;
+    }
+    g_minhook_ready = true;
     if (!DiscoverMods()) {
         LogLine("loader", "nenhum manifesto valido; loader encerrado em modo fail-closed");
         return 2;

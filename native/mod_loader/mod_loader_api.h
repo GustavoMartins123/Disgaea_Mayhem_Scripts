@@ -9,7 +9,7 @@
 // Every structure starts with its size so future ABI versions can reject
 // incompatible callers explicitly instead of guessing a compatible layout.
 
-constexpr std::uint32_t DM_MOD_LOADER_ABI_VERSION = 1;
+constexpr std::uint32_t DM_MOD_LOADER_ABI_VERSION = 2;
 constexpr std::size_t DM_MAX_MOD_OPTIONS = 16;
 
 enum class DmModType : std::uint32_t {
@@ -84,6 +84,10 @@ struct DmModLoaderApi {
     BOOL(WINAPI* FlushModConfig)(const char* mod_id);
     BOOL(WINAPI* ExecuteModAction)(const char* mod_id);
     void(WINAPI* Log)(const char* component, const char* message);
+    BOOL(WINAPI* CreateHook)(const char* mod_id, void* target, void* detour, void** original);
+    BOOL(WINAPI* QueueHook)(const char* mod_id, void* target, BOOL enabled);
+    BOOL(WINAPI* ApplyHooks)();
+    BOOL(WINAPI* RemoveHook)(const char* mod_id, void* target);
 };
 
 struct DmModHostContext {

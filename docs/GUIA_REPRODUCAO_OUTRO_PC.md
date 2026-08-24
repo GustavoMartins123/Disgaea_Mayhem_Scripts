@@ -55,7 +55,7 @@ O script:
 
 1. compila `dxgi.dll` como loader sem UI;
 2. compila `mods/mod_menu/mod_menu.dll` como system mod;
-3. compila os plugins residentes ABI v1;
+3. compila os plugins residentes ABI v2;
 4. implanta cada artefato no caminho declarado pelo manifesto;
 5. executa o validador nativo de schema, arquivos e exports;
 6. executa um smoke test isolado do proxy, loader e system mod, sem actions.

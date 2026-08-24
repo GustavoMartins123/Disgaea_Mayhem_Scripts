@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstring>
 
-#include "../../native/mod_menu_overlay/vendor/minhook/include/MinHook.h"
 #include "../../native/mod_loader/dm_mod_common.h"
 
 namespace {
@@ -75,7 +74,7 @@ BuildListItemFn g_original_build_list_item = nullptr;
 GaugeSnapshot g_snapshots[kTargetCount] = {};
 std::uintptr_t g_list_items[kTargetCount] = {};
 SRWLOCK g_state_lock = SRWLOCK_INIT;
-bool g_minhook_initialized = false;
+bool g_hooks_created = false;
 dm::HostLog Log;
 
 int TargetIndex(std::uint32_t id) {
@@ -394,25 +393,18 @@ bool InstallHooks() {
         return false;
     }
 
-    if (MH_Initialize() != MH_OK) {
-        Log("Falha ao inicializar MinHook.");
-        return false;
-    }
-    g_minhook_initialized = true;
-    if (MH_CreateHook(g_populate_target,
-                      reinterpret_cast<LPVOID>(&HookPopulateInformation),
-                      reinterpret_cast<LPVOID*>(&g_original_populate)) != MH_OK ||
-        MH_CreateHook(g_serialize_target,
-                      reinterpret_cast<LPVOID>(&HookSerializeGaugeValue),
-                      reinterpret_cast<LPVOID*>(&g_original_serialize)) != MH_OK ||
-        MH_CreateHook(g_list_item_target,
-                      reinterpret_cast<LPVOID>(&HookBuildListItem),
-                      reinterpret_cast<LPVOID*>(&g_original_build_list_item)) != MH_OK) {
-        MH_RemoveHook(g_populate_target);
-        MH_RemoveHook(g_serialize_target);
-        MH_RemoveHook(g_list_item_target);
-        MH_Uninitialize();
-        g_minhook_initialized = false;
+    if (!dm::CreateHook(g_populate_target,
+                        reinterpret_cast<void*>(&HookPopulateInformation),
+                        reinterpret_cast<void**>(&g_original_populate)) ||
+        !dm::CreateHook(g_serialize_target,
+                        reinterpret_cast<void*>(&HookSerializeGaugeValue),
+                        reinterpret_cast<void**>(&g_original_serialize)) ||
+        !dm::CreateHook(g_list_item_target,
+                        reinterpret_cast<void*>(&HookBuildListItem),
+                        reinterpret_cast<void**>(&g_original_build_list_item))) {
+        dm::RemoveHook(g_populate_target);
+        dm::RemoveHook(g_serialize_target);
+        dm::RemoveHook(g_list_item_target);
         g_populate_target = nullptr;
         g_serialize_target = nullptr;
         g_list_item_target = nullptr;
@@ -422,17 +414,18 @@ bool InstallHooks() {
         Log("Falha ao instalar os hooks da Cheat Shop.");
         return false;
     }
+    g_hooks_created = true;
     return true;
 }
 
 bool SetHooksEnabled(bool enabled) {
-    if (!g_minhook_initialized || g_populate_target == nullptr ||
+    if (!g_hooks_created || g_populate_target == nullptr ||
         g_serialize_target == nullptr || g_list_item_target == nullptr) {
         return false;
     }
-    const auto queue = enabled ? &MH_QueueEnableHook : &MH_QueueDisableHook;
-    return queue(g_populate_target) == MH_OK && queue(g_serialize_target) == MH_OK &&
-           queue(g_list_item_target) == MH_OK && MH_ApplyQueued() == MH_OK;
+    return dm::QueueHook(g_populate_target, enabled) &&
+           dm::QueueHook(g_serialize_target, enabled) &&
+           dm::QueueHook(g_list_item_target, enabled) && dm::ApplyHooks();
 }
 
 void RemoveHooks() {
@@ -446,17 +439,14 @@ void RemoveHooks() {
     g_information = 0;
     ReleaseSRWLockExclusive(&g_state_lock);
 
-    if (g_minhook_initialized) {
-        if (g_populate_target != nullptr) MH_DisableHook(g_populate_target);
-        if (g_serialize_target != nullptr) MH_DisableHook(g_serialize_target);
-        if (g_list_item_target != nullptr) MH_DisableHook(g_list_item_target);
+    if (g_hooks_created) {
+        SetHooksEnabled(false);
         dm::DrainActiveCalls(g_active_calls);
-        if (g_populate_target != nullptr) MH_RemoveHook(g_populate_target);
-        if (g_serialize_target != nullptr) MH_RemoveHook(g_serialize_target);
-        if (g_list_item_target != nullptr) MH_RemoveHook(g_list_item_target);
-        MH_Uninitialize();
+        dm::RemoveHook(g_populate_target);
+        dm::RemoveHook(g_serialize_target);
+        dm::RemoveHook(g_list_item_target);
     }
-    g_minhook_initialized = false;
+    g_hooks_created = false;
     g_populate_target = nullptr;
     g_serialize_target = nullptr;
     g_list_item_target = nullptr;
@@ -473,7 +463,7 @@ extern "C" __declspec(dllexport) std::uint32_t WINAPI Mod_GetAbiVersion() {
 
 extern "C" __declspec(dllexport) BOOL WINAPI Mod_Initialize(
     const DmModHostContext* context) {
-    if (!dm::AcceptHostContext(context, true)) return FALSE;
+    if (!dm::AcceptHostContext(context, "cheat_shop", true)) return FALSE;
     Log.Bind(context->loader, "cheat_shop");
     g_shutting_down.store(false, std::memory_order_release);
     return InstallHooks() ? TRUE : FALSE;
@@ -518,6 +508,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(
 extern "C" __declspec(dllexport) void WINAPI Mod_Shutdown() {
     RemoveHooks();
     Log.Reset();
+    dm::ReleaseHost();
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {

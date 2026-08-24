@@ -6,7 +6,7 @@ confirmado e isolado dos outros sistemas do jogo.
 
 ## Implementado
 
-- Mod Loader: descoberta por `mod.json`, ABI v1, configuração persistente e
+- Mod Loader: descoberta por `mod.json`, ABI v2, configuração persistente e
   ciclo de vida centralizado.
 - Mod Menu: overlay DirectX 12, controle por teclado e controle, captura dos
   comandos do jogo e ajuste dos painéis ao espaço disponível.

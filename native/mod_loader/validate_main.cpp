@@ -16,6 +16,6 @@ int wmain(int argument_count, wchar_t** arguments) {
         std::fprintf(stderr, "validacao do Mod Loader falhou (codigo=%lu)\n", result);
         return static_cast<int>(result);
     }
-    std::printf("Mod Loader ABI v1: manifestos e plugins validos.\n");
+    std::printf("Mod Loader ABI v2: manifestos e plugins validos.\n");
     return 0;
 }

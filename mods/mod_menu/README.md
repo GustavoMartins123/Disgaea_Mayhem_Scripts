@@ -1,6 +1,6 @@
 # Disgaea Mayhem Mod Menu
 
-System mod de interface do Mod Loader ABI v1.
+System mod de interface do Mod Loader ABI v2.
 
 - Plugin: `mod_menu.dll`
 - Manifesto: `mod.json` (`type: "system"`, `required: true`)
