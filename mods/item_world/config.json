@@ -7,6 +7,7 @@
     "item_points_enabled": true,
     "item_point_multiplier": 200,
     "rarity_enabled": true,
+    "rarity_global": false,
     "minimum_rarity": 100
   }
 }

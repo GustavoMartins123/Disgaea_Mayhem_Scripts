@@ -17,7 +17,11 @@ namespace {
 constexpr std::uintptr_t kApplyRewardsRva = 0x001D77E0;
 constexpr std::uintptr_t kAccumulateItemPointsRva = 0x001D7BD0;
 constexpr std::uintptr_t kGenerateRarityRva = 0x001D58A0;
-constexpr std::uintptr_t kItemWorldRarityReturnRva = 0x003C64D3;
+constexpr std::uintptr_t kItemWorldRarityReturnRvas[] = {
+    0x003C64D3,
+    0x003F71CB,
+    0x003F75F3,
+};
 constexpr std::uintptr_t kItemWorldVtableRva = 0x00A251F0;
 constexpr std::size_t kLevelProgressOffset = 0x68;
 constexpr LONG kMultiplierScale = 1000;
@@ -39,6 +43,7 @@ volatile LONG g_enabled = FALSE;
 volatile LONG g_level_multiplier_enabled = TRUE;
 volatile LONG g_item_point_multiplier_enabled = TRUE;
 volatile LONG g_rarity_enabled = FALSE;
+volatile LONG g_rarity_global = FALSE;
 volatile LONG g_level_multiplier_scaled = kMultiplierScale;
 volatile LONG g_item_point_multiplier_scaled = kMultiplierScale;
 volatile LONG g_minimum_rarity = 50;
@@ -127,6 +132,13 @@ void HookAccumulateItemPoints(void* item_world, std::int64_t base_points) {
                                      ScalePositiveValue(base_points, multiplier));
 }
 
+bool IsItemWorldRarityCaller(std::uintptr_t return_address) {
+    for (std::uintptr_t rva : kItemWorldRarityReturnRvas) {
+        if (return_address == dm::Rva(rva)) return true;
+    }
+    return false;
+}
+
 std::int32_t HookGenerateRarity(const std::int32_t* parameters) {
     dm::CallGuard scope(g_active_calls);
     if (g_original_generate_rarity == nullptr) return -1;
@@ -136,8 +148,11 @@ std::int32_t HookGenerateRarity(const std::int32_t* parameters) {
     if (g_shutting_down.load(std::memory_order_acquire) ||
         InterlockedCompareExchange(&g_enabled, FALSE, FALSE) == FALSE ||
         InterlockedCompareExchange(&g_rarity_enabled, FALSE, FALSE) == FALSE ||
-        return_address != dm::Rva(kItemWorldRarityReturnRva) ||
         rarity < 0 || rarity > 100) {
+        return rarity;
+    }
+    if (InterlockedCompareExchange(&g_rarity_global, FALSE, FALSE) == FALSE &&
+        !IsItemWorldRarityCaller(return_address)) {
         return rarity;
     }
 
@@ -298,6 +313,13 @@ __declspec(dllexport) BOOL WINAPI Mod_SetOption(const char* key, const DmModValu
         InterlockedExchange(&g_rarity_enabled,
                             value->bool_value != FALSE ? TRUE : FALSE);
         SyncHookStates();
+        return TRUE;
+    }
+    if (std::strcmp(key, "rarity_global") == 0) {
+        if (value->type != DmOptionType::Toggle ||
+            (value->bool_value != FALSE && value->bool_value != TRUE)) return FALSE;
+        InterlockedExchange(&g_rarity_global,
+                            value->bool_value != FALSE ? TRUE : FALSE);
         return TRUE;
     }
     if (std::strcmp(key, "minimum_rarity") == 0) {

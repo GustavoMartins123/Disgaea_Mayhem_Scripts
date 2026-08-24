@@ -3,9 +3,9 @@
   "id": "item_world",
   "name": "Item World - Multiplicadores",
   "category": "Item World",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Controla o progresso de nível, os Item Points e a raridade dos equipamentos obtidos no Item World.",
+  "description": "Progresso de nivel e Item Points do Item World. A raridade minima cobre os tres caminhos do Item World; a option global estende a todo o jogo.",
   "type": "toggle",
   "load_order": 110,
   "plugin": "item_world.dll",
@@ -36,7 +36,12 @@
     },
     {
       "id": "rarity_enabled",
-      "name": "Melhorar Raridade dos Equipamentos",
+      "name": "Raridade Minima - somente Item World",
+      "type": "toggle"
+    },
+    {
+      "id": "rarity_global",
+      "name": "Estender Raridade a TODO o jogo (bau, loja, batalha)",
       "type": "toggle"
     },
     {

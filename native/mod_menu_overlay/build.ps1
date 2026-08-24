@@ -298,6 +298,7 @@ foreach ($modId in $disabledMods) {
     "item_points_enabled": false,
     "item_point_multiplier": 1.0,
     "rarity_enabled": false,
+    "rarity_global": false,
     "minimum_rarity": 50
   }
 }

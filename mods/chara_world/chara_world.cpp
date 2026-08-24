@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -53,6 +54,29 @@ ParamBonusApplyFn g_original_param_bonus_apply = nullptr;
 bool g_hooks_created = false;
 dm::HostLog Log;
 SRWLOCK g_param_bonus_lock = SRWLOCK_INIT;
+
+constexpr std::size_t kUnhandledEffectSlots = 16;
+std::atomic<std::uint32_t> g_unhandled_effects[kUnhandledEffectSlots] = {};
+
+void ReportUnhandledEffect(std::uint32_t effect_id) {
+    for (std::size_t index = 0; index < kUnhandledEffectSlots; ++index) {
+        std::uint32_t seen = g_unhandled_effects[index].load(std::memory_order_acquire);
+        if (seen == effect_id) return;
+        if (seen != 0) continue;
+        std::uint32_t expected = 0;
+        if (!g_unhandled_effects[index].compare_exchange_strong(expected, effect_id,
+                                                               std::memory_order_acq_rel)) {
+            if (expected == effect_id) return;
+            continue;
+        }
+        char message[128] = {};
+        std::snprintf(message, sizeof(message),
+                      "Efeito de tile nao multiplicado: id=0x%X (esperado 0x%X).",
+                      effect_id, kParamBonusEffectId);
+        Log(message);
+        return;
+    }
+}
 
 std::int32_t* ResolveCurrentEnergyFromInformation(std::uintptr_t information) {
     if (!dm::IsWritableRange(reinterpret_cast<void*>(information),
@@ -112,8 +136,10 @@ bool ResolveParamBonusDelta(void* task, ParamBonusDelta& output) {
         return false;
     }
     const auto record = *reinterpret_cast<std::uintptr_t*>(descriptor);
-    if (!dm::IsReadableRange(reinterpret_cast<void*>(record), 0x8C) ||
-        *reinterpret_cast<std::uint32_t*>(record + 0x88) != kParamBonusEffectId) {
+    if (!dm::IsReadableRange(reinterpret_cast<void*>(record), 0x8C)) return false;
+    const std::uint32_t effect_id = *reinterpret_cast<std::uint32_t*>(record + 0x88);
+    if (effect_id != kParamBonusEffectId) {
+        ReportUnhandledEffect(effect_id);
         return false;
     }
 
