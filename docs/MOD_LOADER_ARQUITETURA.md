@@ -99,8 +99,8 @@ O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar
 - `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
 - `safe_backup`: uma unica worker, evento de parada, backup inicial e a cada gravação de `save.002`, com rotação pela option `max_backups`.
 - `item_world`: multiplica separadamente os pontos de nível (até 20x) e os Item Points (até 200x). A raridade mínima atinge só um dos seis call sites de `GenerateRarity`.
-- `cheat_shop`: toggle residente que mantém os cinco valores em 5000 e restaura os anteriores ao ser desativado, sem alterar o banco local ou o save.
-- `dark_assembly`: toggle residente que garante a aprovação em memória e não altera `wish.dat`.
+- `cheat_shop`: toggle residente que mantém os cinco valores em 5000 e restaura os anteriores ao ser desativado.
+- `dark_assembly`: toggle residente que garante a aprovação em memória.
 - `dlc_unlocker`: toggle residente que confirma em memória o consumo das definições `1` a `5` injetadas pelo SmokeAPI.
 
 Os arquivos `data/script/*.lub` sao artefatos Lua compilados da engine. Nao existem fontes `.lua` de mods neste repositorio e o loader nao anuncia um runtime Lua inexistente.

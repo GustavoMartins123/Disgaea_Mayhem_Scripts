@@ -5,7 +5,7 @@
   "category": "Qualidade de Vida (QoL)",
   "version": "2.1.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Garante a aprovação das propostas enquanto estiver ativo, sem modificar o banco local.",
+  "description": "Garante a aprovação das propostas enquanto estiver ativo.",
   "type": "toggle",
   "load_order": 120,
   "plugin": "dark_assembly.dll"

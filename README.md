@@ -52,7 +52,7 @@ O rotulo integrado ao Main Menu ainda depende de um gravador NMPLTEX/YKCMP. O in
 - `safe_backup`: backup inicial e a cada gravação de `save.002`, mantendo os N mais recentes por slot (`max_backups`).
 - `item_world`: progresso de nível (até 20x), Item Points (até 200x) e raridade mínima. A raridade cobre apenas um dos seis call sites de `GenerateRarity`; ver `docs/SUBSISTEMA_ITEM_WORLD.md`.
 - `cheat_shop`: mantém EXP, Mana, HL, Weapon Mastery e Item Drops em `5000%` enquanto estiver ativo. O valor de Item Drops pode aumentar muito a quantidade de recompensas.
-- `dark_assembly`: aprovação garantida em memória, sem substituir `wish.dat`.
+- `dark_assembly`: aprovação garantida em memória.
 - `dlc_unlocker`: toggle residente que confirma em memória o consumo dos cinco itens simulados pelo SmokeAPI.
 
 Os detalhes de engenharia reversa ficam em `docs/`. Os arquivos `.lub` de `data/script` pertencem a engine do jogo; nao sao fontes Lua de mods.

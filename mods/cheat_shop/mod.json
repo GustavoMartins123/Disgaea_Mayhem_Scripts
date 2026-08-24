@@ -5,7 +5,7 @@
   "category": "Balanceamento & Trapaças",
   "version": "3.1.0",
   "author": "Disgaea Mayhem Mod Team",
-  "description": "Mantém EXP, Mana, HL, Weapon Mastery e Item Drops em 5000% enquanto estiver ativo, sem alterar o banco local.",
+  "description": "Mantém EXP, Mana, HL, Weapon Mastery e Item Drops em 5000% enquanto estiver ativo.",
   "type": "toggle",
   "load_order": 200,
   "plugin": "cheat_shop.dll"

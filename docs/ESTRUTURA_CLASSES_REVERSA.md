@@ -15,7 +15,7 @@
 5. [SUBSISTEMA_DARK_ASSEMBLY.md](SUBSISTEMA_DARK_ASSEMBLY.md): decisão das
    votações e aprovação temporária em memória.
 6. [SUBSISTEMA_DLC_UNLOCKER.md](SUBSISTEMA_DLC_UNLOCKER.md): DLCs, consumíveis
-   Steam e resgate reutilizável sem alteração das tabelas.
+   Steam e resgate reutilizável.
 
 ## VTables e classes RTTI catalogadas
 

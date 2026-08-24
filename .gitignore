@@ -10,6 +10,8 @@
 !/AGENTS.md
 !/README.md
 !/README_NEXUS.txt
+!/claude_mods.md
+!/codex_mods.md
 !/INSTALAR_MOD.*
 !/dxgi.dll
 !/SmokeAPI.config.json
@@ -17,7 +19,6 @@
 !/docs/
 !/native/
 !/tools/
-!/database_mods/
 !/SmokeAPI/
 
 # 3. Ignorar arquivos temporarios, objetos de compilacao, backups e logs
