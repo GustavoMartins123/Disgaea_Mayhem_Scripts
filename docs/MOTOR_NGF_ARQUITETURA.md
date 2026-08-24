@@ -9,6 +9,11 @@ O jogo divide cada tela e atividade em tarefas. Uma tarefa possui estados para
 entrada, atualização e saída. Item World, Chara World e suas interfaces seguem
 esse modelo.
 
+Na exploração, a IA de inimigos e companions também segue esse modelo, mas é
+executada continuamente em tempo real. A camada tática escolhe uma task e a
+camada de execução realiza busca, movimento, espera ou ataque. A cadeia completa
+está em [SUBSISTEMA_IA_COMBATE.md](SUBSISTEMA_IA_COMBATE.md).
+
 Os objetos compartilhados usam contagem de referências. Por isso um mod não deve
 guardar um endereço obtido em uma sessão e reutilizá-lo depois da troca de tela.
 O endereço deve ser obtido durante uma chamada válida do próprio jogo.

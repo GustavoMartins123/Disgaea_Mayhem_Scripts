@@ -16,6 +16,8 @@
    votações e aprovação temporária em memória.
 6. [SUBSISTEMA_DLC_UNLOCKER.md](SUBSISTEMA_DLC_UNLOCKER.md): DLCs, consumíveis
    Steam e resgate reutilizável.
+7. [SUBSISTEMA_IA_COMBATE.md](SUBSISTEMA_IA_COMBATE.md): decisão em tempo real,
+   máquinas de estado, estratégias, orders, tasks, seleção de alvo e ações.
 
 ## VTables e classes RTTI catalogadas
 
@@ -39,6 +41,29 @@
 | `CTask_Vote_Voting` | `0x140A59960` | `0xA59960` | `0xCE7EB8` | Dados e resultado da votação |
 | `CState_Vote@CTask_Vote_Voting` | `0x140A59850` | `0xA59850` | `0xCE7D58` | Estado da votação |
 | `CSteamInventoryService` | `0x140A85BE8` | `0xA85BE8` | — | Operações do inventário Steam |
+| `CEnemyController` | `0x140A1BF00` | `0xA1BF00` | `0xCA0B70` | Controlador da unidade inimiga |
+| `CEnemyStateMachine` | `0x140A1C178` | `0xA1C178` | `0xC9F218` | Execução de busca, movimento e ataque |
+| `CEnemyTacticsStateMachine` | `0x140A1BF20` | `0xA1BF20` | `0xC9F0E8` | Estados da decisão tática |
+| `CEnemyTacticsManagement` | `0x140A1BEE0` | `0xA1BEE0` | `0xC9FDB0` | Atualização e avaliação da tática |
+| `CEnemyTactics_OrderData` | `0x140A1C0B0` | `0xA1C0B0` | `0xC9B130` | Condições e loteria de tasks |
+| `CEnemyTacticsTask` | `0x140A1BE98` | `0xA1BE98` | `0xC9F248` | Task tática selecionada |
+| `CEnemyTacticsStatus` | `0x140A1BEA8` | `0xA1BEA8` | `0xC9F170` | Estado tático carregado |
+
+## Resumo da IA de combate
+
+- A IA de exploração e combate é atualizada em tempo real; não usa ordem de
+  turnos ou decisões baseadas em SP.
+- A colocação do inimigo escolhe uma estratégia, que transita entre status.
+- Cada status ativa orders; as orders sorteiam tabelas de tasks.
+- A task define a intenção, o movimento e o modo de seleção de alvo.
+- A lista indicada por `enemy.dat::taskActionListID` converte a intenção em uma
+  ação que o inimigo possui.
+- Inimigos e companions compartilham essa infraestrutura, com estratégias e
+  estados próprios.
+
+Consulte `SUBSISTEMA_IA_COMBATE.md` antes de alterar cadência, busca, alvo ou
+pesos. Vários vetores têm capacidade fixa e não podem receber novas entradas
+sem validar o layout carregado.
 
 ## Resumo do Item World
 
