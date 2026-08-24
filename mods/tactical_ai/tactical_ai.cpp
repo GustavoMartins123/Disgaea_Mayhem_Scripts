@@ -64,7 +64,6 @@ constexpr LONG kDefaultCompanionRedecisionFrequencyPercent = 300;
 constexpr std::uint64_t kMaximumDuration = 3600000;
 constexpr std::uint64_t kMaximumRelotteryDuration = 0x0FFFFFFFFFFFFFFFULL;
 constexpr float kMaximumScalar = 1000000.0F;
-constexpr std::uint32_t kMaximumSearchRange = 100000000U;
 constexpr std::size_t kMaximumSnapshots = 512;
 constexpr std::size_t kMaximumUnitIdentities = 1024;
 constexpr std::size_t kMaximumFields = 4;
@@ -170,6 +169,8 @@ std::atomic<bool> g_runtime_faulted{false};
 std::atomic<bool> g_identity_faulted{false};
 std::atomic<LONG> g_state_active_calls{0};
 std::atomic<LONG> g_identity_active_calls{0};
+std::atomic<bool> g_enemy_ai_enabled{true};
+std::atomic<bool> g_companion_ai_enabled{true};
 std::atomic<bool> g_enemy_profile_enabled{true};
 std::atomic<bool> g_companion_profile_enabled{true};
 std::atomic<std::uintptr_t> g_enemy_tactics_management{0};
@@ -218,6 +219,8 @@ std::atomic<bool> g_enemy_search_range_sample_logged{false};
 std::atomic<bool> g_companion_search_range_sample_logged{false};
 std::atomic<bool> g_enemy_redecision_sample_logged{false};
 std::atomic<bool> g_companion_redecision_sample_logged{false};
+std::atomic<bool> g_enemy_ai_block_logged{false};
+std::atomic<bool> g_companion_ai_block_logged{false};
 
 void* g_wait_target = nullptr;
 void* g_attack_wait_target = nullptr;
@@ -261,6 +264,12 @@ bool IsProfileEnabled(UnitSide side) {
     return side == UnitSide::Companion
                ? g_companion_profile_enabled.load(std::memory_order_acquire)
                : g_enemy_profile_enabled.load(std::memory_order_acquire);
+}
+
+bool IsAiEnabled(UnitSide side) {
+    return side == UnitSide::Companion
+               ? g_companion_ai_enabled.load(std::memory_order_acquire)
+               : g_enemy_ai_enabled.load(std::memory_order_acquire);
 }
 
 LONG CurrentDurationPercent(StateKind kind, UnitSide side) {
@@ -433,15 +442,11 @@ bool ReadScalars(std::uintptr_t state, ScalarKind kind,
     for (std::size_t index = 0; index < count; ++index) {
         const std::uint32_t raw = *reinterpret_cast<const std::uint32_t*>(
             state + offsets[index]);
-        if (kind == ScalarKind::SearchRange) {
-            if (raw > kMaximumSearchRange) return false;
-        } else {
-            float scalar = 0.0F;
-            std::memcpy(&scalar, &raw, sizeof(scalar));
-            if (!std::isfinite(scalar) || scalar < 0.0F ||
-                scalar > kMaximumScalar) {
-                return false;
-            }
+        float scalar = 0.0F;
+        std::memcpy(&scalar, &raw, sizeof(scalar));
+        if (!std::isfinite(scalar) || scalar < 0.0F ||
+            scalar > kMaximumScalar) {
+            return false;
         }
         values[index] = raw;
     }
@@ -459,19 +464,8 @@ void WriteScalars(std::uintptr_t state, ScalarKind kind,
     }
 }
 
-bool ScaleScalar(std::uint32_t raw, ScalarKind kind, LONG percent,
+bool ScaleScalar(std::uint32_t raw, ScalarKind, LONG percent,
                  std::uint32_t& scaled_raw) {
-    if (kind == ScalarKind::SearchRange) {
-        const std::uint64_t scaled =
-            (static_cast<std::uint64_t>(raw) *
-                 static_cast<std::uint64_t>(percent) +
-             kPercentScale - 1) /
-            kPercentScale;
-        if (scaled > kMaximumSearchRange) return false;
-        scaled_raw = static_cast<std::uint32_t>(scaled);
-        return true;
-    }
-
     float original = 0.0F;
     std::memcpy(&original, &raw, sizeof(original));
     const float scaled = original * static_cast<float>(percent) /
@@ -985,20 +979,14 @@ void LogScalarSample(ScalarKind kind, UnitSide side, std::uint32_t original_raw,
     }
     if (flag == nullptr || flag->exchange(true, std::memory_order_acq_rel)) return;
 
+    float original = 0.0F;
+    float applied = 0.0F;
+    std::memcpy(&original, &original_raw, sizeof(original));
+    std::memcpy(&applied, &applied_raw, sizeof(applied));
     char message[256] = {};
-    if (kind == ScalarKind::SearchRange) {
-        std::snprintf(message, sizeof(message),
-                      "Amostra de %s para %s: %u -> %u.", ScalarName(kind),
-                      SideName(side), original_raw, applied_raw);
-    } else {
-        float original = 0.0F;
-        float applied = 0.0F;
-        std::memcpy(&original, &original_raw, sizeof(original));
-        std::memcpy(&applied, &applied_raw, sizeof(applied));
-        std::snprintf(message, sizeof(message),
-                      "Amostra de %s para %s: %.3f -> %.3f.",
-                      ScalarName(kind), SideName(side), original, applied);
-    }
+    std::snprintf(message, sizeof(message),
+                  "Amostra de %s para %s: %.3f -> %.3f.",
+                  ScalarName(kind), SideName(side), original, applied);
     Log(message);
 }
 
@@ -1289,10 +1277,26 @@ void HookTacticsManagementUpdate(void* raw_management,
     UnitSide side = UnitSide::Enemy;
     const auto management =
         reinterpret_cast<std::uintptr_t>(raw_management);
-    if (!IdentifyManagementSide(__builtin_return_address(0), side) ||
-        !RegisterTacticsManagement(management, side)) {
+    const bool identity_ok =
+        IdentifyManagementSide(__builtin_return_address(0), side) &&
+        RegisterTacticsManagement(management, side);
+    if (!identity_ok) {
         IdentityFailClosed(
             "Gerenciador tatico sem equipe valida; perfil interrompido e valores restaurados.");
+    }
+    if (identity_ok && g_enabled.load(std::memory_order_acquire) &&
+        !IsAiEnabled(side)) {
+        std::atomic<bool>& logged =
+            side == UnitSide::Companion ? g_companion_ai_block_logged
+                                        : g_enemy_ai_block_logged;
+        if (!logged.exchange(true, std::memory_order_acq_rel)) {
+            char message[160] = {};
+            std::snprintf(message, sizeof(message),
+                          "Atualizacao completa da IA de %s bloqueada.",
+                          SideName(side));
+            Log(message);
+        }
+        return;
     }
     g_original_tactics_management_update(raw_management, update_info);
 }
@@ -1633,6 +1637,8 @@ void ResetSessionCounters() {
     g_enemy_redecision_sample_logged.store(false, std::memory_order_release);
     g_companion_redecision_sample_logged.store(false,
                                                 std::memory_order_release);
+    g_enemy_ai_block_logged.store(false, std::memory_order_release);
+    g_companion_ai_block_logged.store(false, std::memory_order_release);
     g_snapshot_capacity_logged.store(false, std::memory_order_release);
     g_invalid_state_logged.store(false, std::memory_order_release);
     g_runtime_faulted.store(false, std::memory_order_release);
@@ -1785,17 +1791,39 @@ extern "C" __declspec(dllexport) BOOL WINAPI Mod_SetOption(
     const char* key, const DmModValue* value) {
     if (key == nullptr) return FALSE;
 
-    bool profile_enabled = false;
+    bool toggle_enabled = false;
+    if (std::strcmp(key, "enemy_ai_enabled") == 0) {
+        if (!SetToggleOption(value, toggle_enabled)) return FALSE;
+        g_enemy_ai_enabled.store(toggle_enabled, std::memory_order_release);
+        g_enemy_ai_block_logged.store(false, std::memory_order_release);
+        if (g_enabled.load(std::memory_order_acquire)) {
+            Log(toggle_enabled ? "IA dos inimigos ativada."
+                               : "IA dos inimigos desativada.");
+        }
+        return TRUE;
+    }
+    if (std::strcmp(key, "companion_ai_enabled") == 0) {
+        if (!SetToggleOption(value, toggle_enabled)) return FALSE;
+        g_companion_ai_enabled.store(toggle_enabled,
+                                     std::memory_order_release);
+        g_companion_ai_block_logged.store(false, std::memory_order_release);
+        if (g_enabled.load(std::memory_order_acquire)) {
+            Log(toggle_enabled ? "IA dos parceiros ativada."
+                               : "IA dos parceiros desativada.");
+        }
+        return TRUE;
+    }
+
     if (std::strcmp(key, "enemy_profile_enabled") == 0) {
-        if (!SetToggleOption(value, profile_enabled)) return FALSE;
-        g_enemy_profile_enabled.store(profile_enabled,
+        if (!SetToggleOption(value, toggle_enabled)) return FALSE;
+        g_enemy_profile_enabled.store(toggle_enabled,
                                       std::memory_order_release);
         if (g_enabled.load(std::memory_order_acquire)) ReapplySnapshots();
         return TRUE;
     }
     if (std::strcmp(key, "companion_profile_enabled") == 0) {
-        if (!SetToggleOption(value, profile_enabled)) return FALSE;
-        g_companion_profile_enabled.store(profile_enabled,
+        if (!SetToggleOption(value, toggle_enabled)) return FALSE;
+        g_companion_profile_enabled.store(toggle_enabled,
                                           std::memory_order_release);
         if (g_enabled.load(std::memory_order_acquire)) ReapplySnapshots();
         return TRUE;

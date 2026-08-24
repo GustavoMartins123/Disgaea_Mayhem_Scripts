@@ -18,7 +18,12 @@ um combate. Para comparar com o jogo sem ajustes, coloque todos os controles em
 
 ## Controles
 
-Cada equipe possui os mesmos seis controles:
+Cada equipe possui dois controles de ativação e seis parâmetros:
+
+- **IA Ativa**: ligada, o jogo atualiza normalmente o gerenciador daquela
+  equipe. Desligada, a atualização completa do gerenciador é bloqueada; a
+  equipe deixa de procurar alvos, mover e atacar até o controle ser ligado
+  novamente.
 
 - **Ativar Ajustes**: aplica ou restaura apenas o perfil daquela equipe. O
   toggle principal do mod continua ativando ou desativando o conjunto inteiro.
@@ -50,6 +55,10 @@ restaura ao desativar.
 Desmarcar **Ativar Ajustes dos Inimigos** ou **Ativar Ajustes dos Parceiros**
 restaura somente a equipe escolhida. O jogo continua controlando normalmente a
 equipe; apenas os multiplicadores do mod deixam de ser aplicados.
+
+Desmarcar **IA Ativa** é diferente: o plugin deixa de chamar a rotina que
+atualiza todos os integrantes daquela equipe. Marcar novamente retoma a rotina
+original sem reiniciar a fase.
 
 Se a equipe, a estrutura ou um valor não corresponder ao esperado, o perfil é
 interrompido e os valores já alterados são restaurados. O mod não altera `.dat`,

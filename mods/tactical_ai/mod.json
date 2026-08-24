@@ -3,13 +3,18 @@
   "id": "tactical_ai",
   "name": "IA - Perfis de Combate",
   "category": "Combate",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "author": "Disgaea Mayhem Mod Team",
   "description": "Ajusta movimento, busca, pausas, ataques e novas decisões com valores separados para inimigos e parceiros.",
   "type": "toggle",
   "load_order": 175,
   "plugin": "tactical_ai.dll",
   "options": [
+    {
+      "id": "enemy_ai_enabled",
+      "name": "Inimigos - IA Ativa",
+      "type": "toggle"
+    },
     {
       "id": "enemy_profile_enabled",
       "name": "Ativar Ajustes dos Inimigos",
@@ -56,6 +61,11 @@
       "type": "slider_float",
       "min": 25.0,
       "max": 500.0
+    },
+    {
+      "id": "companion_ai_enabled",
+      "name": "Parceiros - IA Ativa",
+      "type": "toggle"
     },
     {
       "id": "companion_profile_enabled",

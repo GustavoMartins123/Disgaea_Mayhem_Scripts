@@ -595,6 +595,13 @@ base da unidade com as taxas de `EnemyData` e grava os três campos locais. A
 inicialização de investida em `0x180E20` grava `+0x1F0`; a inicialização de busca
 em `0x183C50` grava `+0x1B4`. Os hooks são executados depois dessas rotinas.
 
+O alcance em `EnemyData + 0xA4` e `CEnemyState_Searching + 0x1B4` é `float`.
+A rotina de busca carrega o campo com `movss` em `0x184AB2` e o usa como extensão
+espacial. A versão 3.1.0 do plugin tratava os mesmos quatro bytes como inteiro;
+por isso um alcance normal falhava na validação e restaurava todas as alterações
+logo depois da primeira amostra de movimento. A versão 3.2.0 valida e multiplica
+esse campo como `float`.
+
 Na fase inspecionada, um `CEnemyState_Searching` ativo continha `2,460` em
 `+0x90`, `9,840` em `+0x98` e `24,600` em `+0x9C`. Estados `Free` ainda não
 inicializados para movimento mantinham `1,0`. Isso confirma que o carregamento
@@ -712,6 +719,12 @@ Cada equipe também possui um toggle **Ativar Ajustes**. Desmarcá-lo restaura o
 snapshots apenas daquela equipe e mantém a IA original do jogo ativa. O toggle
 principal do mod continua controlando os dois perfis em conjunto.
 
+O toggle **IA Ativa** controla a chamada de
+`CEnemyTacticsManagement::update_Normal` da equipe. Desmarcado, o hook não chama
+a rotina original para o gerenciador correspondente. Como esta build possui
+somente os dois chamadores confirmados da seção 13.2, inimigos e parceiros podem
+ser interrompidos separadamente. O toggle do perfil não participa desse bloqueio.
+
 ### 13.5 Segurança e reversão
 
 - o fingerprint PE é validado pelo loader;
@@ -726,6 +739,8 @@ principal do mod continua controlando os dois perfis em conjunto.
 - estados, campos de movimento e temporizadores táticos mantêm snapshots
   separados, com até 512 entradas em cada grupo;
 - mudar um slider recalcula os snapshots a partir do original;
+- desligar **IA Ativa** bloqueia a atualização do gerenciador somente enquanto
+  o mod estiver ativo;
 - desativar suspende os hooks, aguarda chamadas em andamento e restaura os
   estados ainda válidos;
 - uma divergência encerra a operação sem procurar outro offset e sem aplicar uma
@@ -738,7 +753,8 @@ O plugin não altera `.dat`, scripts `.lub`, banco local ou save.
 O log registra a primeira amostra de cada estado por equipe e, ao desativar,
 informa separadamente quantas entradas de espera de ataque, pausa e busca foram
 ajustadas em inimigos e parceiros. Movimento, alcance e frequência de nova
-decisão também registram uma amostra por equipe.
+decisão também registram uma amostra por equipe. O primeiro bloqueio da
+atualização completa de cada equipe também é registrado.
 
 ### 13.7 Fora do perfil atual
 
