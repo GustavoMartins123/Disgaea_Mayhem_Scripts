@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "mod_id": "tactical_ai",
+  "options": {
+    "enemy_attack_wait_multiplier": 1,
+    "enemy_tactical_wait_multiplier": 1,
+    "enemy_search_delay_multiplier": 1,
+    "companion_attack_wait_multiplier": 0.25,
+    "companion_tactical_wait_multiplier": 0.100000001,
+    "companion_search_delay_multiplier": 0.25
+  }
+}

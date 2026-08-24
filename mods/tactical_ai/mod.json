@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "id": "tactical_ai",
+  "name": "IA - Perfil Agressivo",
+  "category": "Combate",
+  "version": "2.0.0",
+  "author": "Disgaea Mayhem Mod Team",
+  "description": "Reduz pausas e intervalos de combate com controles separados para inimigos e parceiros.",
+  "type": "toggle",
+  "load_order": 175,
+  "plugin": "tactical_ai.dll",
+  "options": [
+    {
+      "id": "enemy_attack_wait_multiplier",
+      "name": "Inimigos - Tempo Antes do Ataque",
+      "type": "slider_float",
+      "min": 0.25,
+      "max": 1.0
+    },
+    {
+      "id": "enemy_tactical_wait_multiplier",
+      "name": "Inimigos - Duracao das Pausas",
+      "type": "slider_float",
+      "min": 0.1,
+      "max": 1.0
+    },
+    {
+      "id": "enemy_search_delay_multiplier",
+      "name": "Inimigos - Intervalo de Busca",
+      "type": "slider_float",
+      "min": 0.25,
+      "max": 1.0
+    },
+    {
+      "id": "companion_attack_wait_multiplier",
+      "name": "Parceiros - Tempo Antes do Ataque",
+      "type": "slider_float",
+      "min": 0.25,
+      "max": 1.0
+    },
+    {
+      "id": "companion_tactical_wait_multiplier",
+      "name": "Parceiros - Duracao das Pausas",
+      "type": "slider_float",
+      "min": 0.1,
+      "max": 1.0
+    },
+    {
+      "id": "companion_search_delay_multiplier",
+      "name": "Parceiros - Intervalo de Busca",
+      "type": "slider_float",
+      "min": 0.25,
+      "max": 1.0
+    }
+  ]
+}

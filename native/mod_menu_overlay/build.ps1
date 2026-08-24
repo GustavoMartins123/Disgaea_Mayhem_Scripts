@@ -146,6 +146,13 @@ $dlcUnlockerOutput = Join-Path $buildRoot 'dlc_unlocker.dll'
     $dlcUnlockerObject -lkernel32
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular dlc_unlocker.dll' }
 
+$tacticalAiObject = Compile-CppObject `
+    (Join-Path $gameRoot 'mods\tactical_ai\tactical_ai.cpp') $pluginObjectRoot
+$tacticalAiOutput = Join-Path $buildRoot 'tactical_ai.dll'
+& $gxx -shared -static-libgcc -static-libstdc++ -o $tacticalAiOutput `
+    $tacticalAiObject -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao vincular tactical_ai.dll' }
+
 $target = $gameRoot.ToString()
 $deployments = @(
     @($loaderOutput, (Join-Path $target 'dxgi.dll')),
@@ -158,7 +165,8 @@ $deployments = @(
     @($validatorOutput, (Join-Path $target 'tools\mod_loader_validate.exe')),
     @($cheatShopOutput, (Join-Path $target 'mods\cheat_shop\cheat_shop.dll')),
     @($darkAssemblyOutput, (Join-Path $target 'mods\dark_assembly\dark_assembly.dll')),
-    @($dlcUnlockerOutput, (Join-Path $target 'mods\dlc_unlocker\dlc_unlocker.dll'))
+    @($dlcUnlockerOutput, (Join-Path $target 'mods\dlc_unlocker\dlc_unlocker.dll')),
+    @($tacticalAiOutput, (Join-Path $target 'mods\tactical_ai\tactical_ai.dll'))
 )
 foreach ($deployment in $deployments) {
     try {
@@ -255,6 +263,12 @@ $releaseFiles = @(
     @((Join-Path $gameRoot 'mods\dlc_unlocker\enabled.txt'), 'mods\dlc_unlocker\enabled.txt'),
     @((Join-Path $gameRoot 'mods\dlc_unlocker\README.md'), 'mods\dlc_unlocker\README.md'),
 
+    @($tacticalAiOutput, 'mods\tactical_ai\tactical_ai.dll'),
+    @((Join-Path $gameRoot 'mods\tactical_ai\mod.json'), 'mods\tactical_ai\mod.json'),
+    @((Join-Path $gameRoot 'mods\tactical_ai\config.json'), 'mods\tactical_ai\config.json'),
+    @((Join-Path $gameRoot 'mods\tactical_ai\enabled.txt'), 'mods\tactical_ai\enabled.txt'),
+    @((Join-Path $gameRoot 'mods\tactical_ai\README.md'), 'mods\tactical_ai\README.md'),
+
     @($safeBackupOutput, 'mods\safe_backup\safe_backup.dll'),
     @((Join-Path $gameRoot 'mods\safe_backup\mod.json'), 'mods\safe_backup\mod.json'),
     @((Join-Path $gameRoot 'mods\safe_backup\config.json'), 'mods\safe_backup\config.json'),
@@ -266,7 +280,7 @@ foreach ($releaseFile in $releaseFiles) {
 }
 
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-$disabledMods = @('chara_world', 'item_world', 'cheat_shop', 'dark_assembly', 'dlc_unlocker', 'safe_backup')
+$disabledMods = @('chara_world', 'item_world', 'cheat_shop', 'dark_assembly', 'dlc_unlocker', 'tactical_ai', 'safe_backup')
 foreach ($modId in $disabledMods) {
     [System.IO.File]::WriteAllText(
         (Join-Path $releaseRoot "mods\$modId\enabled.txt"), '0', $utf8NoBom)

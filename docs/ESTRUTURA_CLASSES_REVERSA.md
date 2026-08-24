@@ -41,7 +41,8 @@
 | `CTask_Vote_Voting` | `0x140A59960` | `0xA59960` | `0xCE7EB8` | Dados e resultado da votação |
 | `CState_Vote@CTask_Vote_Voting` | `0x140A59850` | `0xA59850` | `0xCE7D58` | Estado da votação |
 | `CSteamInventoryService` | `0x140A85BE8` | `0xA85BE8` | — | Operações do inventário Steam |
-| `CEnemyController` | `0x140A1BF00` | `0xA1BF00` | `0xCA0B70` | Controlador da unidade inimiga |
+| `CEnemyController` | `0x140A1BF00` | `0xA1BF00` | `0xCA0B70` | Controlador usado por inimigos e companions |
+| `CCom_ExploreUnit` | `0x140A1D088` | `0xA1D088` | `0xCA1E48` | Unidade de exploração associada ao controller |
 | `CEnemyStateMachine` | `0x140A1C178` | `0xA1C178` | `0xC9F218` | Execução de busca, movimento e ataque |
 | `CEnemyTacticsStateMachine` | `0x140A1BF20` | `0xA1BF20` | `0xC9F0E8` | Estados da decisão tática |
 | `CEnemyTacticsManagement` | `0x140A1BEE0` | `0xA1BEE0` | `0xC9FDB0` | Atualização e avaliação da tática |
@@ -58,8 +59,12 @@
 - A task define a intenção, o movimento e o modo de seleção de alvo.
 - A lista indicada por `enemy.dat::taskActionListID` converte a intenção em uma
   ação que o inimigo possui.
-- Inimigos e companions compartilham essa infraestrutura, com estratégias e
-  estados próprios.
+- Inimigos e companions recebem `CEnemyController` e compartilham a mesma
+  máquina de estados; os fluxos de criação dos dois tipos de companion estão
+  confirmados em `SUBSISTEMA_IA_COMBATE.md`.
+- `CEnemyState + 0x28` aponta para o controller, e
+  `CEnemyController + 0x28` aponta para a `CCom_ExploreUnit`. A origem de criação
+  dessa unidade separa inimigos de parceiros no perfil `tactical_ai`.
 
 Consulte `SUBSISTEMA_IA_COMBATE.md` antes de alterar cadência, busca, alvo ou
 pesos. Vários vetores têm capacidade fixa e não podem receber novas entradas

@@ -12,6 +12,7 @@ FEATURES:
 - Cheat Shop (EXP, Mana, HL, Weapon Mastery, and Item Drops held at 5000%)
 - Dark Assembly Approval (Guaranteed bill passing while enabled)
 - Reusable SmokeAPI consumables (HL, Mana, and three Boost Tickets)
+- Aggressive AI profile for enemies and companions
 - Safe Backup (Initial backup and new backups when save.002 changes)
 
 INSTALLATION:
@@ -37,7 +38,7 @@ HOW TO USE IN-GAME:
 
 UNINSTALLATION:
 1. Close the game.
-2. Remove dxgi.dll and the seven mod folders installed by this package.
+2. Remove dxgi.dll and the eight mod folders installed by this package.
 3. Remove tools/mod_loader_validate.exe.
 4. Remove the SmokeAPI steam_api64.dll and rename steam_api64_o.dll back to steam_api64.dll.
 5. Remove SmokeAPI.config.json if no other installation uses it.

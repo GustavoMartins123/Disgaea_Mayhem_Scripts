@@ -19,7 +19,7 @@ Consulte [docs/MOD_LOADER_ARQUITETURA.md](docs/MOD_LOADER_ARQUITETURA.md) para o
 
 Extraia o pacote e, com o jogo fechado, execute `INSTALAR_MOD.exe`. O instalador
 localiza o jogo ou aceita a pasta como argumento, valida o pacote, instala o
-loader e os sete mods, configura o SmokeAPI e executa o validador ABI v2.
+loader e os oito mods, configura o SmokeAPI e executa o validador ABI v2.
 
 A instalacao e transacional. Em uma atualizacao, `config.json` e `enabled.txt`
 existentes sao preservados. Se uma copia ou a validacao final falhar, os arquivos
@@ -54,5 +54,6 @@ O rotulo integrado ao Main Menu ainda depende de um gravador NMPLTEX/YKCMP. O in
 - `cheat_shop`: mantém EXP, Mana, HL, Weapon Mastery e Item Drops em `5000%` enquanto estiver ativo. O valor de Item Drops pode aumentar muito a quantidade de recompensas.
 - `dark_assembly`: aprovação garantida em memória.
 - `dlc_unlocker`: toggle residente que confirma em memória o consumo dos cinco itens simulados pelo SmokeAPI.
+- `tactical_ai`: perfis agressivos separados para inimigos e parceiros, com pausas, busca e espera antes dos ataques configuráveis em tempo real.
 
 Os detalhes de engenharia reversa ficam em `docs/`. Os arquivos `.lub` de `data/script` pertencem a engine do jogo; nao sao fontes Lua de mods.

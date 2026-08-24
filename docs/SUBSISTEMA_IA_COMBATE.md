@@ -482,6 +482,71 @@ não como início garantido de função:
 | `isCondition` | próximo de `0x189D8C` |
 | `update_Normal` | próximo de `0x194FCA` |
 
+### 11.5 Uso da mesma IA pelos parceiros
+
+Os companions de combate também recebem `CEnemyController`. A cadeia foi
+confirmada pelas VTables das funções internas criadas pelos dois métodos de
+spawn:
+
+```text
+CExploreInformation::makeCompanionPlayerUnit
+  lambda VTable 0xA496A0, referência em 0x3CA5C6
+  chamada em 0x3CA9B5 -> 0x192950
+
+CExploreInformation::makeCompanionKidsUnit
+  lambda VTable 0xA49668, referência em 0x3CD134
+  chamada em 0x3CD48C -> 0x192950
+
+0x192950
+  cria CEnemyTactics
+  chama 0x1925F0
+
+0x1925F0
+  cria CEnemyTacticsTask
+  chamada em 0x19272D -> CEnemyController::CEnemyController, 0x18DDC0
+```
+
+Isso confirma que `CEnemyStateMachine` e seus estados não são exclusivos da
+equipe inimiga, apesar dos nomes internos. Um hook nas entradas desses estados
+atinge tanto inimigos quanto parceiros.
+
+### 11.6 Unidade proprietária e identificação da equipe
+
+A cadeia do estado até a unidade foi confirmada:
+
+```text
+CEnemyState + 0x28
+  -> CEnemyController
+
+CEnemyController + 0x28
+  -> CCom_ExploreUnit
+```
+
+O construtor `CEnemyController::CEnemyController`, em `0x18DDC0`, recebe a
+`CCom_ExploreUnit` e a conserva em `+0x28`. A fábrica compartilhada em
+`0x192950` possui seis chamadores estáticos nesta build:
+
+| Retorno após a chamada | Origem |
+| ---: | --- |
+| `0x3CA9BA` | `makeCompanionPlayerUnit` |
+| `0x3CD491` | `makeCompanionKidsUnit` |
+| `0x3CF0AF` | `makeEnemyKidsUnit` |
+| `0x3D2C50` | `makeEnemyUnit` |
+| `0x13A077` | recriação do controller de unidade existente |
+| `0x13A1A1` | recriação do controller de unidade existente |
+
+Os quatro criadores nomeados fornecem a identificação canônica de equipe. Os
+dois caminhos de recriação não definem uma equipe nova: eles só são aceitos para
+uma `CCom_ExploreUnit` que já esteja registrada. O destrutor virtual principal
+de `CCom_ExploreUnit`, em `0x163D60`, encerra esse registro.
+
+Existe ainda um marcador usado durante a criação do corpo da unidade. Em
+`0x3D4220`, o jogo lê o byte `+0x40` de um objeto apontado pelo campo `+0x110`
+da definição. Esse byte escolhe as máscaras `0x1100` e `0x1900` e é copiado para
+`+0x359` do corpo criado. Ele reforça que o jogo diferencia os lados durante o
+spawn, mas o nome definitivo do campo ainda não foi recuperado. O mod não usa
+esse byte como classificador.
+
 ## 12. Scripts de ataque
 
 Há 374 arquivos cujo nome corresponde a `attack_Enemy*.lub`. O cabeçalho
@@ -502,150 +567,107 @@ O executável também contém o nome
 orquestram movimento, efeitos, som e acerto da ação já escolhida. A decisão de
 alto nível continua nas tabelas de estratégia, status, order e task.
 
-## 13. Perfil proposto: IA agressiva
+## 13. Primeira implementação: perfis agressivos separados
 
-O perfil deve ser um mod independente, por exemplo `mods/tactical_ai/`. O Mod
-Menu apenas envia ativação e opções genéricas. A DLL mantém snapshot dos valores
-originais, altera somente a memória e restaura o snapshot em `Mod_Disable()`.
+O perfil foi implementado em `mods/tactical_ai/` como plugin ABI v2 independente.
+O Mod Menu apenas apresenta as opções e despacha o ciclo de vida genérico.
 
-### 13.1 Objetivo
+### 13.1 Escopo
 
-Reduzir o tempo entre localizar um alvo e iniciar um ataque, sem acelerar
-animações, aumentar atributos ou trocar os golpes próprios de cada inimigo.
+A primeira versão reduz o tempo ocioso sem alterar atributos, dano, golpes,
+alvos ou velocidade de animação. Ela atua quando a unidade entra em três estados:
 
-### 13.2 Alterações da primeira versão
+| Estado | Entrada, RVA | Temporizadores ajustados |
+| --- | ---: | --- |
+| `CEnemyState_AttackWait` | `0x17BF60` | `+0x70`, `+0x78`, `+0x1A8`, `+0x1B0` |
+| `CEnemyState_Wait` | `0x17A5E0` | `+0x40`, `+0x48`, `+0x70`, `+0x78` |
+| `CEnemyState_Searching` | `0x183FF0` | `+0x70`, `+0x78` |
 
-| Camada | Alteração | Motivo |
-| --- | --- | --- |
-| `EnemyData` | reduzir `attackWaitTime` com piso configurável | remove espera explícita antes do próximo ataque |
-| `EnemyData` | ampliar `searchArea` de forma limitada | inicia a perseguição antes |
-| `enemyTacticsTaskTable` | reduzir o peso das tasks de espera nas tabelas de ataque | evita sortear pausa quando já há alvo |
-| `enemyTacticsTaskTable` | aumentar o peso relativo de ataque curto e investida | favorece ações que entram em alcance rapidamente |
-| `enemyTacticsOrder` | reavaliar quando a task termina e, depois de validado, em intervalo curto | reduz permanência em uma escolha obsoleta |
-| `enemyTacticsTask` | conservar os modos de alvo originais na versão inicial | evita transformar agressividade em foco artificial no jogador |
+Os offsets acima guardam os pares de duração criados pelas próprias rotinas de
+entrada. O hook chama a função original primeiro e só então aplica o
+multiplicador ao valor recém-criado.
 
-O perfil não deve remover todas as esperas. Algumas delas fecham animações,
-recuperação após dano e transições de estado. A primeira versão altera apenas
-tasks passivas dentro das loterias táticas, nunca os estados internos
-`Wait_Motion` ou `Wait_AfterDamage`.
+### 13.2 Inimigos e parceiros
 
-### 13.3 Níveis do perfil
+As rotinas de criação de companions chamam a mesma fábrica que cria
+`CEnemyController`, conforme a cadeia da seção 11.5. A origem descrita na seção
+11.6 registra cada `CCom_ExploreUnit` como inimigo ou parceiro. Quando um estado
+é iniciado, o plugin resolve `estado -> controller -> unidade` e escolhe o
+conjunto correspondente de multiplicadores.
 
-As opções podem ser expressas como multiplicadores, aplicados sempre sobre o
-snapshot original:
+O nome interno da classe não é usado como filtro. Também não há classificação
+por posição, alvo, estratégia ou outro sinal indireto.
 
-| Opção | Moderado | Agressivo | Implacável |
-| --- | ---: | ---: | ---: |
-| espera de ataque | 0,80x | 0,55x | 0,35x |
-| peso de espera tática | 0,70x | 0,35x | 0,10x |
-| peso de ataque | 1,15x | 1,40x | 1,80x |
-| área de busca | 1,10x | 1,25x | 1,50x |
+### 13.3 Opções
 
-Esses números são uma proposta inicial, não valores extraídos do jogo. Pesos
-inteiros devem ser normalizados sem ultrapassar o tipo do campo e sem criar
-novas entradas nos vetores.
+Os valores são aplicados sobre o temporizador original, nunca sobre um valor já
+reduzido:
 
-### 13.4 Segunda etapa, após telemetria
+| Lado | Opção | Padrão | Faixa |
+| --- | --- | ---: | ---: |
+| inimigos | tempo antes do ataque | 0,55x | 0,25x a 1,00x |
+| inimigos | duração das pausas | 0,35x | 0,10x a 1,00x |
+| inimigos | intervalo de busca | 0,60x | 0,25x a 1,00x |
+| parceiros | tempo antes do ataque | 0,40x | 0,25x a 1,00x |
+| parceiros | duração das pausas | 0,20x | 0,10x a 1,00x |
+| parceiros | intervalo de busca | 0,40x | 0,25x a 1,00x |
 
-Registrar em memória, sem persistência:
+`1,00x` conserva a duração sorteada pelo jogo. O piso impede que as transições
+sejam reduzidas a zero.
 
-- tempo entre `FIND_PLAYER` e entrada em `CEnemyState_Attack`;
-- quantidade de tasks de espera sorteadas com alvo válido;
-- quantidade de reavaliações por segundo;
-- tempo gasto perseguindo um alvo fora do alcance;
-- diferença por estratégia, boss e Item World.
+### 13.4 Segurança e reversão
 
-Com esses dados será possível ajustar os argumentos de `RELOTTERY_SEC`, separar
-inimigos comuns de bosses e evitar reavaliação excessiva. O mod deve parar com
-erro explícito se não encontrar exatamente os registros esperados.
+- o fingerprint PE é validado pelo loader;
+- os estados, a fábrica, o destrutor e os seis chamadores são verificados;
+- cada objeto é validado como memória gravável e cada duração tem limite de
+  sanidade;
+- a equipe precisa ter sido registrada por um dos quatro criadores conhecidos;
+- uma recriação só é aceita para uma unidade que já possua identidade;
+- até 512 estados ativos mantêm snapshot do valor original;
+- mudar um slider recalcula os snapshots a partir do original;
+- desativar suspende os hooks, aguarda chamadas em andamento e restaura os
+  estados ainda válidos;
+- uma divergência encerra a operação sem procurar outro offset e sem aplicar uma
+  alteração parcial ao estado rejeitado.
 
-### 13.5 Limites da primeira versão
+O plugin não altera `.dat`, scripts `.lub`, banco local ou save.
 
-- não altera arquivos `.dat` no disco;
-- não grava no save;
-- não adiciona entradas a vetores de capacidade fixa;
-- não substitui scripts `.lub`;
-- não muda bosses que usam uma estratégia especial sem uma regra específica;
-- não promete melhorar posicionamento coletivo, desvio ou coordenação entre
-  inimigos; essas funções exigem análise adicional de `SURROUND`, boids e
-  colisão.
+### 13.5 Telemetria atual
 
-### 13.6 Opções propostas no Mod Menu
+O log registra a primeira amostra de cada estado por equipe e, ao desativar,
+informa separadamente quantas entradas de espera de ataque, pausa e busca foram
+ajustadas em inimigos e parceiros.
 
-O manifesto continuaria genérico; nenhuma regra da IA seria adicionada ao código
-do Mod Menu. Esboço das opções:
+### 13.6 Etapas futuras
 
-```json
-{
-  "schema_version": 1,
-  "id": "tactical_ai",
-  "name": "IA - Perfil Agressivo",
-  "category": "Combate",
-  "version": "0.1.0",
-  "type": "toggle",
-  "plugin": "tactical_ai.dll",
-  "options": [
-    {
-      "id": "attack_wait_multiplier",
-      "name": "Multiplicador da Espera entre Ataques",
-      "type": "slider_float",
-      "min": 0.25,
-      "max": 1.0
-    },
-    {
-      "id": "search_area_multiplier",
-      "name": "Multiplicador da Área de Busca",
-      "type": "slider_float",
-      "min": 1.0,
-      "max": 1.5
-    },
-    {
-      "id": "passive_weight_multiplier",
-      "name": "Peso das Pausas Táticas",
-      "type": "slider_float",
-      "min": 0.1,
-      "max": 1.0
-    },
-    {
-      "id": "attack_weight_multiplier",
-      "name": "Peso das Tasks de Ataque",
-      "type": "slider_float",
-      "min": 1.0,
-      "max": 2.0
-    },
-    {
-      "id": "affect_bosses",
-      "name": "Aplicar Também aos Bosses",
-      "type": "toggle"
-    }
-  ]
-}
-```
+O perfil ainda não altera `searchArea`, pesos de tasks ou `RELOTTERY_SEC`. Esses
+pontos permanecem úteis para uma segunda versão, mas exigem validação dinâmica
+das estruturas carregadas e da unidade dos intervalos.
 
-`Mod_SetOption()` recalcula todo o conjunto a partir do snapshot original. Ele
-não multiplica um valor já alterado. `affect_bosses` começa desativado no
-`config.json`, porque as estratégias especiais precisam ser verificadas antes de
-receber o mesmo perfil dos inimigos comuns.
+Também permanecem fora desta versão: posicionamento coletivo, desvio,
+coordenação, seleção de habilidade e regras específicas por boss.
 
-## 14. Estrutura recomendada do mod
+## 14. Estrutura do mod
 
 ```text
 mods/tactical_ai/
+├── config.json
 ├── enabled.txt
 ├── mod.json
 ├── README.md
+├── tactical_ai.cpp
 └── tactical_ai.dll
 ```
 
 Responsabilidades da DLL:
 
 1. validar o fingerprint da build;
-2. localizar o repositório carregado de dados por uma chamada válida do jogo;
-3. validar IDs, quantidades e capacidades;
-4. capturar um snapshot imutável antes da primeira alteração;
+2. validar as rotinas, VTables e objetos de estado;
+3. interceptar somente as três entradas documentadas;
+4. capturar um snapshot antes da primeira alteração de cada estado;
 5. recalcular os valores sempre a partir do snapshot;
-6. restaurar exatamente o snapshot ao desativar;
-7. rejeitar a ativação se qualquer validação falhar.
+6. restaurar o snapshot ao desativar;
+7. rejeitar a ativação se qualquer validação estrutural falhar.
 
 Não deve haver varredura alternativa, offset substituto ou aplicação parcial.
 
@@ -661,6 +683,10 @@ Não deve haver varredura alternativa, offset substituto ou aplicação parcial.
 - classes, heranças, RTTI e VTables listadas;
 - seleção por menor distância no `targetMode` 3;
 - uso compartilhado das tabelas por inimigos e companions;
+- criação de `CEnemyController` nos fluxos de companion player e companion kids;
+- cadeia `CEnemyState -> CEnemyController -> CCom_ExploreUnit`;
+- quatro origens de criação e dois caminhos de recriação do controller;
+- separação dos multiplicadores e da telemetria por equipe;
 - atualização sobre unidades da exploração em tempo real.
 
 ### Inferência apoiada por evidência
@@ -676,5 +702,6 @@ Não deve haver varredura alternativa, offset substituto ou aplicação parcial.
 - nomes definitivos dos campos internos de condição da task table;
 - semântica dos três campos restantes das ações em `enemyTaskActionList`;
 - ponteiro proprietário da máquina de estado tática;
+- nome definitivo do marcador `definition[+0x110][+0x40]` usado no spawn;
 - papel completo de boids, cerco e colisão na coordenação coletiva;
 - limite de companions simultâneos e efeitos sobre HUD, câmera e alocação.

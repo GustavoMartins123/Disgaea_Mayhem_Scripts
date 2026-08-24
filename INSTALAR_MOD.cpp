@@ -62,6 +62,12 @@ constexpr InstallEntry kInstallEntries[] = {
     {L"mods\\dlc_unlocker\\dlc_unlocker.dll", false},
     {L"mods\\dlc_unlocker\\README.md", false},
 
+    {L"mods\\tactical_ai\\mod.json", false},
+    {L"mods\\tactical_ai\\config.json", true},
+    {L"mods\\tactical_ai\\enabled.txt", true},
+    {L"mods\\tactical_ai\\tactical_ai.dll", false},
+    {L"mods\\tactical_ai\\README.md", false},
+
     {L"mods\\safe_backup\\mod.json", false},
     {L"mods\\safe_backup\\config.json", true},
     {L"mods\\safe_backup\\enabled.txt", true},
@@ -572,6 +578,6 @@ int wmain(int argument_count, wchar_t** arguments) {
         return 9;
     }
 
-    std::wprintf(L"\n[OK] Loader, Mod Menu, sete mods e SmokeAPI instalados e validados.\n");
+    std::wprintf(L"\n[OK] Loader, Mod Menu, oito mods e SmokeAPI instalados e validados.\n");
     return 0;
 }
