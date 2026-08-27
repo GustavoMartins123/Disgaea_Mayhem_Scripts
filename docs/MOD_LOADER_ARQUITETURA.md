@@ -1,53 +1,70 @@
 # Arquitetura do Mod Loader
 
-## Diagnostico do desenho anterior
+Este documento descreve a arquitetura atual do Mod Loader e serve como referência para quem quiser entender ou desenvolver plugins para o projeto.
 
-O arquivo `native/mod_menu_overlay/mod_menu_overlay.cpp` reunia seis responsabilidades em uma unica DLL: proxy de `dxgi.dll`, bootstrap, descoberta de manifestos, ciclo de vida das DLLs, actions externas e a interface DirectX 12/ImGui.
+Para instalar e usar os mods, não é necessário conhecer estes detalhes. Consulte o `README.md` da raiz para uma visão geral do pacote.
 
-O build copiava o mesmo binario para `dxgi.dll` e para `mods/native/DisgaeaMayhemModMenu.dll`. Ao mesmo tempo, `item_world.dll` e `chara_world.dll` liam `enabled.txt`, criavam threads e ativavam o proprio mod dentro de `DllMain`. Depois, o Mod Menu carregava a DLL novamente e chamava `Mod_Enable`. Esse fluxo tinha duas autoridades de estado e permitia inicializacao duplicada sob o loader lock do Windows.
-
-Outros problemas confirmados:
-
-- atualizar a lista repetia a inicializacao dos mods ativos;
-- a DLL podia ser escolhida por busca de `*.dll`, sem `plugin` canonico;
-- a ABI aceitava `start_mod`/`uninstall_mod` silenciosamente;
-- actions eram escolhidas por busca de nomes e extensoes;
-- o caminho Lua chamava um `lua.exe` externo ausente;
-- pastas sem `mod.json` viravam mods implicitos;
-- uma falha de ativacao podia deixar `enabled.txt` marcado como ativo.
-
-## Componentes atuais
+## Visão geral
 
 ```text
 Disgaea_Mayhem.exe
   -> dxgi.dll
        proxy DXGI + Mod Loader
-       -> valida mods/*/mod.json
-       -> carrega primeiro type=system
+       -> descobre mods/*/mod.json
+       -> carrega primeiro os system mods
             -> mods/mod_menu/mod_menu.dll
-                 hooks DX12 + ImGui; somente UI
-       -> carrega uma vez os toggles habilitados
-       -> chama actions com executable explicito
+                 DirectX 12 + ImGui
+       -> inicializa os plugins habilitados
+       -> fornece configuração, logging e serviços de hook
 ```
 
-`dxgi.dll` e infraestrutura residente. Ele nao e um mod e nao contem UI. O Mod Menu e um plugin `type: "system"`, obrigatorio e carregado em ordem zero. Ele recebe uma tabela de funcoes do loader e nunca chama `LoadLibrary`, procura DLLs, grava `enabled.txt` ou executa processos diretamente.
+`dxgi.dll` é a infraestrutura principal do loader. Ele não contém a interface do Mod Menu nem a lógica específica dos mods de gameplay.
 
-## Bootstrap canonico
+O Mod Menu é um plugin obrigatório do tipo `system`. Os demais recursos ficam em plugins separados dentro de `mods/<id>/`.
 
-1. O jogo chama uma exportacao do proxy DXGI.
-2. O proxy resolve `%SystemRoot%/System32/dxgi.dll` e inicia uma unica worker por `InitOnceExecuteOnce`.
-3. A worker resolve a pasta do jogo por `GetModuleFileNameW(nullptr, ...)`.
-4. Cada subpasta com `mod.json` e validada. Pastas sem manifesto sao ignoradas.
-5. IDs duplicados, caminhos com separadores, arquivo ausente, schema, configuracao ou tipo desconhecido sao rejeitados.
-6. O system mod obrigatorio e carregado primeiro. Se falhar, o bootstrap termina fail-closed.
-7. Toggles com `enabled.txt=1` sao inicializados pela ABI v2 e permanecem residentes.
-8. Actions usam somente o campo `executable`.
+## Estrutura de um plugin
 
-Plugins nao sao descarregados durante a sessao. `Mod_Disable` remove o efeito funcional, para workers e desabilita hooks, mas a DLL continua residente. Isso evita callbacks, TLS e threads apontando para codigo descarregado.
+Um plugin residente normalmente possui:
+
+```text
+mods/<id>/
+|-- mod.json
+|-- config.json
+|-- enabled.txt
+|-- <plugin>.dll
+`-- README.md
+```
+
+- `mod.json`: descreve o mod, sua DLL e as opções disponíveis;
+- `config.json`: guarda os valores escolhidos para as opções;
+- `enabled.txt`: guarda o estado ligado/desligado;
+- DLL: implementação nativa do plugin;
+- `README.md`: documentação do mod para o usuário.
+
+O loader descobre os mods pelos manifestos `mod.json`. Não existe um registro global de mods e o nome da DLL não é inferido: o arquivo usado por cada plugin é declarado explicitamente no manifesto.
+
+## Inicialização
+
+Quando o jogo carrega `dxgi.dll`, o proxy encaminha as funções DXGI necessárias para a biblioteca original do Windows e inicializa o Mod Loader.
+
+O loader então:
+
+1. encontra a pasta do jogo;
+2. procura as subpastas de `mods/` que possuem `mod.json`;
+3. valida os manifestos e as configurações;
+4. carrega o Mod Menu obrigatório;
+5. inicializa os demais plugins residentes;
+6. ativa aqueles que estão marcados como habilitados.
+
+Uma falha em um mod comum não deve impedir os outros de serem carregados. Uma falha no Mod Menu obrigatório impede a inicialização normal do conjunto.
+
+As DLLs permanecem carregadas durante a sessão. Desativar um mod remove seu efeito funcional e desabilita seus hooks ou workers, mas não descarrega a DLL no meio da execução do jogo.
 
 ## ABI nativa v2
 
-Todo plugin `toggle` ou `system` exporta exatamente:
+Plugins residentes usam a ABI definida em `native/mod_loader/mod_loader_api.h`.
+
+Cada plugin exporta:
 
 ```cpp
 uint32_t WINAPI Mod_GetAbiVersion();
@@ -58,62 +75,89 @@ BOOL WINAPI Mod_SetOption(const char* id, const DmModValue* value);
 void WINAPI Mod_Shutdown();
 ```
 
-`Mod_SetOption` e obrigatorio quando o manifesto declara opcoes. `DllMain` deve ser passivo: hooks, threads e chamadas ao host pertencem a `Mod_Initialize`/`Mod_Enable`.
+`Mod_Initialize` recebe o contexto do loader e prepara o plugin. `Mod_Enable` e `Mod_Disable` controlam o efeito durante a sessão. `Mod_SetOption` recebe alterações feitas pelo Mod Menu e `Mod_Shutdown` encerra o plugin de forma limpa.
 
-A ABI esta em `native/mod_loader/mod_loader_api.h`. Estruturas incluem `struct_size` e `abi_version`; divergencias sao rejeitadas explicitamente.
+Inicialização pesada não deve ser feita em `DllMain`.
 
-## Manifesto canonico
+## Manifestos
 
-Cada mod possui somente `mods/<diretorio>/mod.json`, com `schema_version: 1`.
+Os manifestos usam `schema_version: 1` e descrevem informações como:
 
-Todos declaram `id`, `name`, `category`, `version`, `author`, `description`,
-`type` e `load_order`. Campo ausente, texto maior que o limite aceito ou ordem
-fora do intervalo encerra a leitura daquele manifesto com erro.
+- identificador e nome do mod;
+- categoria, versão, autor e descrição;
+- tipo do mod;
+- ordem de carregamento;
+- DLL ou executável correspondente;
+- opções exibidas no Mod Menu.
 
-- `toggle`: exige `plugin` e `enabled.txt` contendo exatamente `0` ou `1`.
-- `system`: exige `plugin`, `required` e `enabled.txt=1`.
-- `action`: exige `executable`, `action_label`, `success_status` e `auto_apply`.
+Os tipos atualmente suportados são:
 
-Nao existe registro agregado, descoberta de qualquer DLL, nome inferido de executavel ou ABI alternativa.
+- `toggle`: plugin que pode ser ligado e desligado;
+- `system`: plugin obrigatório de infraestrutura ou interface;
+- `action`: ação executável disparada pelo loader.
 
-## Configuracao persistente
+Manifestos inválidos, arquivos ausentes e configurações incompatíveis são rejeitados antes da ativação do mod.
 
-`mod.json` descreve opcoes imutaveis: `id`, nome, tipo e limites. Os valores nao ficam no manifesto. Todo plugin `toggle` ou `system` exige `mods/<id>/config.json` com esta estrutura:
+## Configuração
+
+`mod.json` define quais opções existem e seus limites. `config.json` guarda somente os valores escolhidos pelo usuário.
+
+Exemplo:
 
 ```json
 {
   "schema_version": 1,
   "mod_id": "exemplo",
   "options": {
-    "opcao_inteira": 100,
-    "opcao_toggle": true
+    "multiplicador": 5.0,
+    "ativar_recurso": true
   }
 }
 ```
 
-O loader exige correspondencia exata com o manifesto: nenhuma option pode faltar, sobrar ou aparecer duplicada. Tipos, intervalos e numeros finitos sao validados antes de carregar a DLL. Em runtime, a configuracao validada fica em RAM. Durante o arraste de um slider, o novo valor e aplicado ao plugin sem gravacao por quadro. O `config.json` e persistido ao encerrar a edicao ou fechar o menu, usando `config.json.tmp` e `MoveFileExW`. Se a gravacao falhar, o ultimo valor persistido e reaplicado ao plugin. Se o rollback tambem falhar, o mod e desativado e marcado como falho.
+O loader valida tipos e intervalos antes de entregar os valores ao plugin.
 
-## Estado atual dos mods
+Durante o uso de sliders, o novo valor pode ser aplicado imediatamente em memória. A configuração é persistida quando a edição termina ou quando o menu é fechado. Se a gravação falhar, o loader tenta restaurar o último valor persistido.
 
-- `mod_menu`: system mod ABI v2; nao gerencia DLLs.
-- `chara_world`: mantém a energia e multiplica os cinco atributos ganhos nos tiles.
-- `safe_backup`: uma unica worker, evento de parada, backup inicial e a cada gravação de `save.002`, com rotação pela option `max_backups`.
-- `item_world`: multiplica separadamente os pontos de nível (até 20x) e os Item Points (até 200x). A raridade mínima atinge só um dos seis call sites de `GenerateRarity`.
-- `cheat_shop`: toggle residente que mantém os cinco valores em 5000 e restaura os anteriores ao ser desativado.
-- `dark_assembly`: toggle residente que garante a aprovação em memória.
-- `dlc_unlocker`: toggle residente que confirma em memória o consumo das definições `1` a `5` injetadas pelo SmokeAPI.
+## Hooks
 
-Os arquivos `data/script/*.lub` sao artefatos Lua compilados da engine. Nao existem fontes `.lua` de mods neste repositorio e o loader nao anuncia um runtime Lua inexistente.
+O Mod Loader mantém uma única instância do MinHook para o processo e fornece os serviços de hook aos plugins pela ABI.
 
-## Build e validacao
+Isso evita que cada mod inicialize uma cópia independente do MinHook e permite ao loader controlar conflitos entre plugins que tentem usar o mesmo endereço.
+
+Funções auxiliares compartilhadas pelos plugins ficam em `native/mod_loader/dm_mod_common.h`.
+
+## Plugins atuais
+
+- `mod_menu`: interface DirectX 12/ImGui e entrada de teclado, mouse e controle;
+- `chara_world`: trava de energia e multiplicador experimental dos atributos recebidos nos tiles;
+- `item_world`: multiplicadores de progresso de nível e Item Points, além da raridade mínima experimental;
+- `cheat_shop`: mantém os cinco valores principais da Cheat Shop em 5000% enquanto ativo;
+- `dark_assembly`: garante aprovação das propostas durante a votação;
+- `dlc_unlocker`: trabalha com as entradas injetadas pelo SmokeAPI para tornar reutilizáveis cinco consumíveis;
+- `tactical_ai`: ajustes separados da IA de inimigos e parceiros;
+- `safe_backup`: cria e rotaciona backups dos saves conforme `max_backups`.
+
+As limitações funcionais de cada mod ficam no respectivo `mods/<id>/README.md`. Em particular, a raridade do Item World e o multiplicador de atributos do Chara World ainda são recursos experimentais.
+
+## Dados internos do jogo
+
+Os documentos `docs/SUBSISTEMA_*.md` registram informações encontradas durante a investigação do executável, incluindo estruturas, offsets, RVAs e nomes de arquivos `.dat` usados pelo próprio jogo.
+
+Essas referências ajudam a explicar como os sistemas do Disgaea Mayhem foram identificados. **A presença de um `.dat` na documentação não significa que o mod edite esse arquivo.** Os plugins de gameplay atuais aplicam seus efeitos em memória, salvo quando a documentação de um recurso disser explicitamente o contrário.
+
+## Build e validação
+
+Com o jogo fechado:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File native/mod_menu_overlay/build.ps1
 ```
 
-O build implanta separadamente loader, Mod Menu e plugins ABI v2. Ao final, `mod_loader_validate.exe` valida schema, arquivos e exports sem executar actions. Depois, um smoke test cria uma raiz isolada apenas com o proxy e o system mod, chama `CreateDXGIFactory1` e confirma no log que os hooks e o bootstrap foram concluidos.
+O processo de build compila o loader, o Mod Menu, os plugins, o validador e o instalador. Antes de gerar o pacote final, são feitas validações dos manifestos, arquivos e exports esperados.
 
-O mesmo build compila `INSTALAR_MOD.exe`, monta uma distribuicao por lista
-fechada, valida os sete manifestos dentro dela e testa duas instalacoes isoladas:
-uma instalacao limpa e uma atualizacao que precisa preservar configuracao e
-estado. O ZIP do Nexus so substitui o anterior depois dessas verificacoes.
+O pacote final é gerado como:
+
+`Disgaea_Mayhem_Mod_Loader_Nexus.zip`
+
+Para um guia específico de criação de novos plugins, consulte `docs/GUIA_INTEGRACAO_MODS.md`.
