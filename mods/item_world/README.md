@@ -1,35 +1,50 @@
 # Item World - Multiplicadores
 
-Este mod controla três resultados do Item World:
+Este mod oferece ajustes para três partes do Item World:
 
 - progresso usado para aumentar o nível do item;
-- Item Points recebidos nas batalhas;
-- raridade dos equipamentos obtidos.
+- Item Points recebidos durante a exploração;
+- raridade mínima dos equipamentos gerados pelo jogo.
 
-Cada ganho possui um controle próprio para ativar ou desativar o multiplicador.
-O valor `1.0` mantém o cálculo normal do jogo. Valores maiores aceleram o ganho e
-podem produzir saltos grandes ao concluir uma exploração.
+## Progresso de nível
 
-Opções:
+Ative **Multiplicar Progresso de Nível** e escolha um multiplicador entre `1x` e `20x`.
 
-- `level_exp_enabled` e `level_exp_multiplier`: progresso de nível entre `1x` e `20x`;
-- `item_points_enabled` e `item_point_multiplier`: Item Points entre `1x` e `20x`;
-- `rarity_enabled` e `minimum_rarity`: raridade mínima entre `0` e `100`.
+`1x` mantém o comportamento normal do jogo. Valores maiores aceleram o progresso aplicado ao item ao concluir a exploração.
 
-Todas as alterações são feitas na memória. Desativar o mod ou um de seus
-controles faz as próximas recompensas usarem o cálculo normal.
+## Item Points
 
-O controle de raridade define um valor mínimo entre `0` e `100`. Resultados que
-já seriam melhores são mantidos. Ele atua somente nos equipamentos criados como
-recompensa do Item World e não muda a quantidade de itens.
+Ative **Multiplicar Item Points** e escolha um multiplicador entre `1x` e `200x`.
 
-O mod não altera chance de equipamentos, escolha de salas ou Innocents. Essas
-opções só serão incluídas quando houver uma rotina confirmada para cada uma.
-O multiplicador de Item Points também não altera a quantidade de equipamentos.
+Esse ajuste aumenta os Item Points recebidos, mas não aumenta a quantidade de equipamentos obtidos e não controla a raridade deles.
 
-As opções ficam em `config.json` e também aparecem no Mod Menu.
+## Raridade mínima — experimental
 
-Se a versão do jogo ou as rotinas verificadas não corresponderem, o plugin não é
-carregado e nenhuma alteração é aplicada.
+A parte de raridade **funciona apenas parcialmente e ainda está sendo investigada**.
 
-Consulte `docs/SUBSISTEMA_ITEM_WORLD.md` para os dados confirmados do jogo.
+O jogo possui vários caminhos diferentes para criar equipamentos. O mod já consegue interceptar alguns desses caminhos, mas a cobertura ainda não é completa e o resultado pode variar dependendo de onde o item foi gerado.
+
+Existem duas opções:
+
+- **Raridade Mínima - somente Item World**: tenta aplicar o valor mínimo aos caminhos identificados como pertencentes ao Item World;
+- **Estender Raridade a TODO o jogo**: também tenta aplicar o mínimo a outros caminhos de geração de equipamentos.
+
+O valor de **Raridade Mínima** pode ser configurado entre `0` e `100`. Quando o mod consegue atuar naquele equipamento, uma raridade que já seria maior que o mínimo é mantida.
+
+Não considere a opção global como garantia de que todo item do jogo terá a raridade escolhida. Essa funcionalidade continua experimental enquanto os demais caminhos de geração são identificados e testados.
+
+## O que este mod não altera
+
+O mod não controla atualmente:
+
+- chance ou quantidade de equipamentos recebidos;
+- escolha entre salas comuns e salas misteriosas;
+- encontro, ganho ou subjugação de Innocents.
+
+Alguns arquivos `.dat` do jogo relacionados ao Item World, recompensas, ondas e Innocents são mencionados na documentação técnica porque foram úteis para entender esses sistemas. **O plugin não modifica esses arquivos diretamente.** Os recursos implementados atualmente funcionam por alterações em memória durante a execução do jogo.
+
+As opções são salvas em `config.json` e podem ser alteradas pelo Mod Menu.
+
+Se uma atualização do jogo tornar as rotinas conhecidas incompatíveis, o plugin pode recusar o carregamento para evitar aplicar alterações em locais incorretos.
+
+Para detalhes de engenharia reversa, consulte `docs/SUBSISTEMA_ITEM_WORLD.md`.
