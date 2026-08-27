@@ -1,53 +1,41 @@
-# Planejamento dos mods
+# Estado e planejamento dos mods
 
-Este arquivo separa o que já está implementado do que ainda depende de pesquisa
-no executável. Um item só deve aparecer no Mod Menu depois que seu fluxo estiver
-confirmado e isolado dos outros sistemas do jogo.
+Este documento resume o que já está disponível no pacote e quais recursos ainda estão em desenvolvimento ou investigação.
 
-## Implementado
+## Disponível atualmente
 
-- Mod Loader: descoberta por `mod.json`, ABI v2, configuração persistente e
-  ciclo de vida centralizado.
-- Mod Menu: overlay DirectX 12, controle por teclado e controle, captura dos
-  comandos do jogo e ajuste dos painéis ao espaço disponível.
-- Chara World: energia configurável e multiplicador dos atributos ganhos nos
-  tiles.
-- Item World: multiplicadores separados de progresso de nível e Item Points,
-  além de raridade mínima para os equipamentos obtidos.
-- Cheat Shop: cinco valores mantidos em `5000%` na memória enquanto o mod está
-  ativo, com restauração ao desativar e durante a gravação do save.
-- Dark Assembly: aprovação garantida na memória da votação atual.
-- DLC Unlocker: resgate reutilizável das definições `1` a `5` injetadas pelo
-  SmokeAPI.
-- Backup Seguro: backup inicial e novos arquivos quando `save.002` muda.
+- **Mod Menu**: interface dentro do jogo para ativar mods e alterar opções em tempo real.
+- **Chara World**: trava de energia configurável. O multiplicador de atributos dos tiles está disponível, mas ainda é experimental e pode apresentar resultados irregulares.
+- **Item World**: multiplicadores de progresso de nível e Item Points. A raridade mínima está disponível de forma experimental e ainda não cobre de maneira confiável todos os caminhos usados pelo jogo para gerar equipamentos.
+- **Cheat Shop**: mantém EXP, Mana, HL, Weapon Mastery e Item Drops em `5000%` enquanto estiver ativado.
+- **Dark Assembly**: aprovação garantida das propostas enquanto o mod estiver ativo.
+- **DLC Unlocker**: permite reutilizar os cinco consumíveis fornecidos pelo SmokeAPI incluído no pacote.
+- **Tactical AI**: ajustes separados para inimigos e parceiros, incluindo ataque, pausas, busca, movimento, alcance e frequência de novas decisões.
+- **Safe Backup**: cria backups automáticos dos saves e mantém uma quantidade configurável de cópias recentes por slot.
 
-O atalho visual `Mods` dentro do Main Menu ainda não foi implementado. O
-instalador existente apenas valida o atlas NMPLTEX/YKCMP e encerra com erro sem
-alterar o arquivo.
+## Recursos que ainda estão sendo investigados
 
-## Item World pendente
+### Item World
 
-### Chance e quantidade de equipamentos
+A geração de equipamentos possui vários caminhos internos. A raridade mínima já funciona em parte deles, mas a cobertura ainda não é completa. A opção global deve ser considerada experimental.
 
-É necessário localizar o cálculo específico das recompensas do Item World e
-separá-lo do controle `Item Drops` da Cheat Shop. O multiplicador de Item Points
-e a raridade mínima já estão isolados e não devem ser usados para quantidade.
+Também continuam em investigação:
 
-### Salas misteriosas
+- chance e quantidade específica de equipamentos no Item World;
+- escolha entre salas comuns e salas misteriosas;
+- encontro, ganho e subjugação de Innocents.
 
-Os dados de sala e de ondas foram encontrados, mas a rotina que escolhe entre
-sala comum e sala misteriosa ainda não foi confirmada.
+Os arquivos `.dat` relacionados a recompensas, ondas, salas e Innocents podem aparecer nas anotações técnicas porque ajudam a identificar os sistemas internos do jogo. Eles **não são modificados diretamente pelos mods atuais**.
 
-### Innocents
+### Chara World
 
-A classe e os bancos foram identificados. Ainda falta confirmar onde o jogo
-registra encontro, derrota, ganho e subjugação.
+A trava de energia está implementada. O multiplicador dos atributos recebidos nos tiles ainda apresenta comportamento variável dependendo do tipo de ganho e continua sendo investigado.
 
-## Outros mods pendentes
+## Ideias para mods futuros
 
-- Evilities e habilidades sem restrições de classe.
-- Alcance e formato de magias e ataques em área.
-- Velocidade de movimento na base.
-- Paletas de cores e aparências alternativas.
+- Evilities e habilidades sem restrições de classe;
+- alcance e formato de magias e ataques em área;
+- velocidade de movimento na base;
+- paletas de cores e aparências alternativas.
 
-Esses itens ainda não possuem pontos de alteração validados.
+Esses itens são ideias ou pesquisas em andamento e não devem ser considerados recursos disponíveis no pacote atual.
