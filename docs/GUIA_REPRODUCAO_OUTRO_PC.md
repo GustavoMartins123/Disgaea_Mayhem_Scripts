@@ -1,84 +1,122 @@
-# Guia de instalacao em outro computador
+# Instalação em outro computador
 
-## Pre-requisitos
+Este guia explica como instalar o pacote pronto do Disgaea Mayhem Mod Loader em outro computador. Você **não precisa compilar o projeto** para usar os mods.
 
-- Disgaea Mayhem x64 instalado pela Steam.
-- TDM-GCC-64 no `PATH` ou em uma unica pasta `TDM-GCC-64\bin` na raiz de um
-  drive montado.
-- O jogo fechado durante build/implantacao.
+## Requisitos
 
-Python nao faz parte do runtime nem do fluxo de build deste projeto.
+- Disgaea Mayhem x64 instalado pela Steam;
+- Windows compatível com o jogo;
+- o jogo fechado durante a instalação ou atualização.
 
-## Estrutura canonica
+## Instalação do pacote pronto
+
+1. Extraia `Disgaea_Mayhem_Mod_Loader_Nexus.zip` em uma pasta normal.
+2. Feche o Disgaea Mayhem caso esteja aberto.
+3. Execute `INSTALAR_MOD.exe`.
+4. Aguarde a cópia e a validação dos arquivos.
+5. Inicie o jogo normalmente.
+
+O instalador tenta localizar automaticamente a instalação do jogo.
+
+Se mais de uma instalação for encontrada, informe manualmente a pasta que contém `Disgaea_Mayhem.exe`:
+
+```text
+INSTALAR_MOD.exe "C:\caminho\para\pasta-do-jogo"
+```
+
+## Atualizações
+
+Você pode instalar uma versão nova do pacote sobre uma instalação existente.
+
+O instalador preserva:
+
+- `config.json`, que contém as opções escolhidas;
+- `enabled.txt`, que contém o estado ligado/desligado dos mods.
+
+Em uma instalação nova, apenas o Mod Menu começa ativado.
+
+Se ocorrer uma falha durante a cópia ou validação, o instalador tenta restaurar os arquivos anteriores em vez de deixar uma instalação parcialmente atualizada.
+
+## Abrindo o Mod Menu
+
+Durante o jogo, use:
+
+- `F1`, `Insert` ou `Home` no teclado;
+- `L3 + R3` ou `Back` no controle.
+
+Os mods podem ser ativados, desativados e configurados pelo menu.
+
+## Arquivos instalados
+
+A instalação possui, de forma simplificada:
 
 ```text
 <pasta-do-jogo>/
 |-- Disgaea_Mayhem.exe
-|-- dxgi.dll                         # proxy DXGI + Mod Loader
-|-- SmokeAPI.config.json             # exigido apenas pelos consumiveis Steam
+|-- dxgi.dll
+|-- SmokeAPI.config.json
 |-- mods/
 |   |-- mod_menu/
-|   |   |-- mod.json
-|   |   |-- config.json
-|   |   |-- enabled.txt
-|   |   `-- mod_menu.dll             # system mod de UI
-|   |-- chara_world/                 # chara_world.dll + manifesto/configuracao
-|   |-- item_world/                  # item_world.dll + manifesto/configuracao
-|   |-- cheat_shop/                  # cheat_shop.dll + manifesto/configuracao
-|   |-- dark_assembly/               # dark_assembly.dll + manifesto/configuracao
-|   |-- dlc_unlocker/                # dlc_unlocker.dll + manifesto/configuracao
-|   `-- safe_backup/                 # safe_backup.dll + manifesto/configuracao
-`-- native/
-    |-- mod_loader/
-    `-- mod_menu_overlay/
+|   |-- chara_world/
+|   |-- item_world/
+|   |-- cheat_shop/
+|   |-- dark_assembly/
+|   |-- dlc_unlocker/
+|   |-- tactical_ai/
+|   `-- safe_backup/
+`-- tools/
+    `-- mod_loader_validate.exe
 ```
 
-Nao existe `mods/registry.json` nem uma DLL agregada em `mods/native`. Cada pasta com `mod.json` e a unidade canonica de descoberta.
+`dxgi.dll` é o Mod Loader. Cada pasta dentro de `mods/` contém um plugin e seus arquivos de configuração. `mod_menu` é o plugin responsável pela interface dentro do jogo.
 
-Todo plugin `toggle` ou `system` exige `config.json` com `schema_version`, `mod_id` exato e todas as opcoes declaradas no manifesto. Campo ausente, extra, duplicado, tipo incorreto ou valor fora do intervalo rejeita o mod. Sliders sao aplicados em RAM durante o ajuste e gravados atomicamente ao encerrar a edicao ou fechar o menu. Uma falha de gravacao restaura o ultimo valor persistido.
+## SmokeAPI e DLC Unlocker
 
-O `dlc_unlocker` nao cria entradas no inventario. O pacote inclui o SmokeAPI e a
-configuracao com `auto_inject_inventory: true` e as definicoes `1`, `2`, `3`, `4`
-e `5` em `extra_inventory_items`. O instalador aplica esses arquivos e conserva a
-biblioteca Steam original em `steam_api64_o.dll`. O plugin recusa qualquer pedido
-fora dessas definicoes ou com uma quantidade diferente de uma unidade.
+O DLC Unlocker utiliza o SmokeAPI incluído no pacote para disponibilizar cinco consumíveis na interface do jogo:
 
-## Build e implantacao
+- HL Bag;
+- Mana Bag;
+- Boost Ticket 100%;
+- Boost Ticket 400%;
+- Boost Ticket 900%.
 
-A partir da pasta do jogo:
+O instalador mantém a biblioteca Steam original como `steam_api64_o.dll` para que o SmokeAPI possa encaminhar as chamadas necessárias.
+
+Se a configuração do SmokeAPI for removida ou alterada, esses cinco consumíveis podem deixar de aparecer.
+
+## Recursos experimentais
+
+Dois recursos ainda estão sendo investigados e podem apresentar comportamento inconsistente:
+
+- **Item World — raridade mínima:** funciona em parte dos caminhos de geração de equipamentos, mas ainda não cobre de forma confiável todos eles;
+- **Chara World — multiplicador de atributos:** alguns ganhos em tiles podem ser multiplicados corretamente enquanto outros podem seguir caminhos diferentes do jogo.
+
+Essas limitações não significam necessariamente que a instalação falhou. Consulte o README do mod correspondente para detalhes.
+
+## Sobre arquivos `.dat`
+
+A documentação técnica do projeto cita alguns arquivos `.dat` pertencentes ao próprio Disgaea Mayhem porque eles foram úteis durante a investigação de sistemas como Item World, Cheat Shop, Dark Assembly e outros.
+
+**Esses arquivos não precisam ser editados pelo usuário e não são o mecanismo usado pelos plugins atuais para aplicar os mods.** Os efeitos de gameplay implementados atualmente são aplicados em memória durante a execução do jogo, salvo quando um recurso disser explicitamente o contrário.
+
+## Problemas
+
+Se um mod aparecer como incompatível ou falhar ao carregar, consulte:
+
+`mods/mod_loader.log`
+
+Uma atualização do Disgaea Mayhem pode alterar as rotinas internas utilizadas por um plugin. Quando uma incompatibilidade conhecida é detectada, o plugin pode recusar o carregamento em vez de modificar uma região incorreta da memória.
+
+## Para quem quer compilar o projeto
+
+Compilar não é necessário para instalar o pacote pronto.
+
+Para desenvolvimento, o projeto utiliza TDM-GCC-64. Com o jogo fechado, execute na raiz do projeto:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File native/mod_menu_overlay/build.ps1
 ```
 
-O script:
+O script compila e valida o loader, o Mod Menu, os plugins e o instalador antes de gerar `Disgaea_Mayhem_Mod_Loader_Nexus.zip`.
 
-1. compila `dxgi.dll` como loader sem UI;
-2. compila `mods/mod_menu/mod_menu.dll` como system mod;
-3. compila os plugins residentes ABI v2;
-4. implanta cada artefato no caminho declarado pelo manifesto;
-5. executa o validador nativo de schema, arquivos e exports;
-6. executa um smoke test isolado do proxy, loader e system mod, sem actions.
-
-Qualquer falha encerra o build. Nao ha escolha de binario alternativo nem injecao manual.
-
-## Uso
-
-O build gera `Disgaea_Mayhem_Mod_Loader_Nexus.zip`. Em outro computador:
-
-1. extraia o pacote;
-2. feche o jogo;
-3. execute `INSTALAR_MOD.exe`;
-4. se a busca encontrar nenhuma ou mais de uma instalacao, informe como
-   argumento a pasta que contem `Disgaea_Mayhem.exe`;
-5. inicie o jogo somente depois da validacao ABI terminar sem erro.
-
-O instalador preserva `config.json` e `enabled.txt` existentes. Uma instalacao
-nova deixa apenas o Mod Menu ativado. Copias e remocoes conhecidas da arquitetura
-antiga fazem parte de uma transacao; qualquer falha restaura o estado anterior.
-
-Abra o Mod Menu por `F1`, `Insert`, `Home`, `L3 + R3` ou `Back`.
-
-O rotulo integrado ao Main Menu depende de escrita NMPLTEX/YKCMP ainda nao implementada no instalador C++. O instalador valida os arquivos e retorna erro sem alterar o atlas; use os atalhos ate esse servico ser concluido.
-
-Consulte `docs/MOD_LOADER_ARQUITETURA.md` para a arquitetura e as limitacoes atuais de cada mod.
+Para detalhes internos, consulte `docs/MOD_LOADER_ARQUITETURA.md` e `docs/GUIA_INTEGRACAO_MODS.md`.
